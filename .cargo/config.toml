@@ -1,0 +1,18 @@
+# optimize for size
+[unstable]
+build-std = ["std", "panic_abort", "panic_unwind", "core", "alloc", "proc_macro"]
+build-std-features=["optimize_for_size", "panic_immediate_abort"]
+
+[profile.release]
+debug = false
+strip = "debuginfo"  # Automatically strip symbols from the binary.
+opt-level = "z"  # Optimize for size.
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+incremental = false
+
+
+[profile.release.build-override]
+rustflags = ["-Zlocation-detail=none"]
+
