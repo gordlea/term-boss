@@ -1,0 +1,51 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+    
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'iterm-tab'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=iterm-tab",
+                    "--package=iterm-tab",
+                ],
+                "filter": {
+                    "name": "iterm-tab",
+                    "kind": "bin"
+                }
+            },
+            "args": [
+                "set",
+                "--tabname", "blarg2",
+                "--tabcolor", "cornsilk",
+                "--badgetext", "'\\(hostname)'"
+            ],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'iterm-tab'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=iterm-tab",
+                    "--package=iterm-tab"
+                ],
+                "filter": {
+                    "name": "iterm-tab",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}

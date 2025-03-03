@@ -1,10 +1,13 @@
 cargo-features = ["profile-rustflags"]
 [package]
-name = "iterm-boss"
+name = "iterm-tab"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+anyhow = "1.0.97"
 base64 = "0.22.1"
 clap = { version = "4.5.31", default-features = false,  features = ["std", "help", "usage", "error-context", "derive", "env"] }
+serde = { version = "1.0.218", features = ["derive"] }
+serde_yml = "0.0.12"
 strum = { version = "0.27.1", features = ["std", "derive"] }

@@ -1,12 +1,16 @@
+use std::{fmt::{self, Formatter, LowerHex}, io::Read};
+
 use clap::ValueEnum;
+use serde::Deserialize;
 use strum::{IntoStaticStr, VariantArray};
 
 
 pub type ColorValue = [u8; 3];
 
-#[derive(Debug, Clone, IntoStaticStr, VariantArray)]
+#[derive(Debug, Clone, IntoStaticStr, VariantArray, Deserialize)]
 #[repr(u8)]
 #[strum(ascii_case_insensitive, serialize_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
 pub enum Color {
     Antiquewhite,
     Aliceblue,
@@ -323,5 +327,15 @@ impl ValueEnum for Color {
         let x: &'static str = self.into();
 
         Some(clap::builder::PossibleValue::new(x))
+    }
+}
+
+impl LowerHex for Color {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        let bytes = self.get_rgb();
+        for byte in bytes {
+            write!(f, "{:02x}", byte)?;
+        }
+        Ok(())
     }
 }
