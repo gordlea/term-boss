@@ -1,10 +1,8 @@
-use std::{ env, io::Write, path::PathBuf };
+use std:: io::Write;
 use ansi::{ reset_tab_color, reset_tab_name, set_badge_text, set_tab_bg_color, set_tab_name };
 // use argh::FromArgs;
-use colors::Color;
 use clap::{ Parser, Subcommand };
 use config::{ read_hierarchial_config, SetConfig };
-use serde::Deserialize;
 
 mod colors;
 mod ansi;

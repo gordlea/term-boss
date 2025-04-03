@@ -1,4 +1,4 @@
-use std::{fmt::{self, Formatter, LowerHex}, io::Read};
+use std::fmt::{self, Formatter, LowerHex};
 
 use clap::ValueEnum;
 use serde::Deserialize;

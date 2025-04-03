@@ -1,6 +1,5 @@
 use std::{env, fs};
-// use argh::FromArgs;
-use clap::{Args, Parser, Subcommand};
+use clap::Args;
 use serde::Deserialize;
 use anyhow::{Context, Result};
 use crate::colors::Color;

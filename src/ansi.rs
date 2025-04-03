@@ -1,9 +1,7 @@
 use std::io::Write;
 
 use crate::colors::Color;
-use serde::{Deserialize, Serialize};
-use strum::{IntoStaticStr, VariantArray};
-use base64::{engine::general_purpose::URL_SAFE, Engine as _};
+use base64::{engine::general_purpose::URL_SAFE, Engine};
 
 
 pub fn set_tab_bg_color(stdout: &mut std::io::Stdout, tabcolor: &Color) {
