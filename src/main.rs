@@ -41,6 +41,7 @@ fn main() {
     match &cli.command {
         Commands::Set(cli_set_config) => {
             let config = read_hierarchial_config(cli_set_config).unwrap();
+            eprintln!("config: {:?}", config);
 
             if config.reset {
                 terminal_app.reset_tab_color(&mut stdout);
