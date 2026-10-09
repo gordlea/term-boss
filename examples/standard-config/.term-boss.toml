@@ -1,0 +1,20 @@
+# Every top-level key. All of them are optional, and each has a matching CLI flag.
+
+# Tab title (OSC 0, or `wezterm cli set-tab-title` on WezTerm).
+tabname = "my-project"
+
+# Tab background colour. iTerm2 and WezTerm only. Any colour format works:
+# a CSS name, "#rgb", "#rrggbb", "0xrrggbb" or "rgb(r, g, b)".
+tabcolor = "steelblue"
+
+# iTerm2 badge, or WezTerm right-status text. Emoji are fine.
+badgetext = "🚀 dev"
+
+# Pane colours, sent as OSC 10 / 11 / 12. Work in every supported terminal.
+fgcolor = "#eeeeee"
+bgcolor = "rgb(26, 32, 44)"
+cursorcolor = "orange"
+
+# Reset anything this config does not set (tab name, colours, badge, palette) to the
+# terminal's defaults, so values from a previous directory do not linger.
+reset = true
