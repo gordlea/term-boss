@@ -1,33 +1,37 @@
-use std::{io::Write, process::{Command, Stdio}};
+use std::{
+    io::{Stdout, Write},
+    process::{Command, Stdio},
+};
 
-use base64::{engine::general_purpose::URL_SAFE, Engine};
+use base64::{Engine, engine::general_purpose::STANDARD};
 
 use crate::colors::Color;
 
-const ITERM2_RESET_BG_COLOR_ANSI: &'static str =  "\x1B]6;1;bg;*;default\x07";
-const ITERM2_RESET_TAB_NAME: &'static str =  "\x1B]0;\x07";
-const WEZTERM_RESET_BG_COLOR_ANSI: &'static str =  "\x1B]1337;SetUserVar=TAB_COLOR=#ff5500\x07";
+const ITERM2_RESET_BG_COLOR_ANSI: &str = "\x1B]6;1;bg;*;default\x07";
+const OSC0_RESET_TAB_NAME: &str = "\x1B]0;\x07";
 
+/// WezTerm pane user vars read by the Lua module installed via `term-boss setup wezterm`.
+const WEZTERM_VAR_TAB_COLOR: &str = "TAB_COLOR";
+const WEZTERM_VAR_TAB_BADGE: &str = "TAB_BADGE";
 
-fn wezterm_cli_runner(args: &[&str]) {
-    // let mut command_args: Vec<&str> = Vec::with_capacity(args.len() + 1);
-    // command_args.extend_from_slice(args);
-
-    let result = Command::new("wezterm")
-        .arg("cli")
-        .args(args)
-        .output();
-        // .stdin(Stdio::null())
-        // .stdout(Stdio::null())
-        // .stderr(Stdio::null())
-        // .spawn();
-    if let Err(e) = result {
-        eprintln!("Failed to run wezterm command: {:?}", e);
-    } else if let Ok(output) = result {
-            eprintln!("Wezterm command worked with output: {:?}", output);
-    }
+/// Emit `OSC 1337 ; SetUserVar=name=<base64 value> BEL`.
+/// WezTerm requires the value to be standard base64; an empty value clears the var.
+fn osc_set_user_var(stdout: &mut Stdout, name: &str, value: &str) {
+    let encoded = STANDARD.encode(value.as_bytes());
+    let _ = write!(stdout, "\x1B]1337;SetUserVar={}={}\x07", name, encoded);
 }
 
+/// Run `wezterm cli <args>` for the current pane (wezterm reads WEZTERM_PANE from the env).
+/// Output is discarded so nothing leaks into the shell on every `cd`.
+fn wezterm_cli(args: &[&str]) {
+    let _ = Command::new("wezterm")
+        .arg("cli")
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
 
 #[derive(Debug, PartialEq, Eq, Default)]
 pub enum TerminalApp {
@@ -39,97 +43,95 @@ pub enum TerminalApp {
     Konsole,
 }
 
+/// Dynamic pane colours set via the xterm OSC 10/11/12 family.
+/// Reset uses the matching OSC 110/111/112.
+#[derive(Debug, Clone, Copy)]
+pub enum PaneColor {
+    Foreground = 10,
+    Background = 11,
+    Cursor = 12,
+}
+
 impl TerminalApp {
-    pub fn reset_tab_color(&self, stdout: &mut std::io::Stdout) {
+    pub fn reset_tab_color(&self, stdout: &mut Stdout) {
         match self {
-            
             TerminalApp::Iterm2 => {
-                let ansi = ITERM2_RESET_BG_COLOR_ANSI.as_bytes();
-                stdout.write(ansi).unwrap();
-            },
-            TerminalApp::Alacritty => todo!(),
+                let _ = stdout.write_all(ITERM2_RESET_BG_COLOR_ANSI.as_bytes());
+            }
             TerminalApp::Wezterm => {
-                let ansi = WEZTERM_RESET_BG_COLOR_ANSI.as_bytes();
-                stdout.write(ansi).unwrap();
-            },
-            TerminalApp::Konsole => todo!(),
-            TerminalApp::Unknown => { /* no op */ },
+                osc_set_user_var(stdout, WEZTERM_VAR_TAB_COLOR, "");
+            }
+            TerminalApp::Alacritty | TerminalApp::Konsole | TerminalApp::Unknown => { /* no op */ }
         }
     }
 
-    pub fn reset_tab_name(&self, stdout: &mut std::io::Stdout) {
+    pub fn reset_tab_name(&self, stdout: &mut Stdout) {
         match self {
-            TerminalApp::Iterm2 => {
-                let ansi = ITERM2_RESET_TAB_NAME.as_bytes();
-                stdout.write(ansi).unwrap();
-            },
-            TerminalApp::Alacritty => todo!(),
+            TerminalApp::Iterm2 | TerminalApp::Alacritty | TerminalApp::Konsole => {
+                let _ = stdout.write_all(OSC0_RESET_TAB_NAME.as_bytes());
+            }
             TerminalApp::Wezterm => {
-                wezterm_cli_runner(&["set-tab-title", ""]);
-            },
-            TerminalApp::Konsole => todo!(),
-            TerminalApp::Unknown => { /* no op */ },
+                // An empty tab title makes wezterm fall back to the active pane's title.
+                wezterm_cli(&["set-tab-title", ""]);
+            }
+            TerminalApp::Unknown => { /* no op */ }
         }
     }
 
-
-    pub fn set_badge_text(&self, stdout: &mut std::io::Stdout, badgetext: &str) {
+    pub fn set_badge_text(&self, stdout: &mut Stdout, badgetext: &str) {
         match self {
             TerminalApp::Iterm2 => {
-                let encoded_badgetext = URL_SAFE.encode(badgetext.as_bytes());
-                let badgetext = format!("\x1B]1337;SetBadgeFormat={}\x07", encoded_badgetext).into_bytes();
-                stdout.write(&badgetext).unwrap();
-            },
-            TerminalApp::Alacritty => todo!(),
-            TerminalApp::Wezterm => {},
-            TerminalApp::Konsole => todo!(),
-            TerminalApp::Unknown => { /* no op */ },
+                let encoded = STANDARD.encode(badgetext.as_bytes());
+                let _ = write!(stdout, "\x1B]1337;SetBadgeFormat={}\x07", encoded);
+            }
+            TerminalApp::Wezterm => {
+                // Shown in the right status area by termboss.lua; empty clears it.
+                osc_set_user_var(stdout, WEZTERM_VAR_TAB_BADGE, badgetext);
+            }
+            TerminalApp::Alacritty | TerminalApp::Konsole | TerminalApp::Unknown => { /* no op */ }
         }
     }
 
-    pub fn set_tab_bg_color(&self, stdout: &mut std::io::Stdout, tabcolor: &Color) {
+    pub fn set_tab_bg_color(&self, stdout: &mut Stdout, tabcolor: &Color) {
         match self {
             TerminalApp::Iterm2 => {
-                let color = tabcolor.get_rgb();
-
-                // let red = tabcolor[0].to_string();
-                let mut ansi = format!("\x1B]6;1;bg;red;brightness;{}\x07", color[0]).into_bytes();
-                stdout.write(&ansi).unwrap();
-
-                ansi = format!("\x1B]6;1;bg;green;brightness;{}\x07", color[1]).into_bytes();
-                stdout.write(&ansi).unwrap();
-
-                ansi = format!("\x1B]6;1;bg;blue;brightness;{}\x07", color[2]).into_bytes();
-                stdout.write(&ansi).unwrap();
-            },
-            TerminalApp::Alacritty => todo!(),
+                let [r, g, b] = tabcolor.get_rgb();
+                let _ = write!(stdout, "\x1B]6;1;bg;red;brightness;{}\x07", r);
+                let _ = write!(stdout, "\x1B]6;1;bg;green;brightness;{}\x07", g);
+                let _ = write!(stdout, "\x1B]6;1;bg;blue;brightness;{}\x07", b);
+            }
             TerminalApp::Wezterm => {
-                let color = tabcolor.get_rgb();
-                let value = format!("\x1B]1337;SetUserVar=TAB_COLOR=rgb({},{},{})\x07", color[0], color[1], color[2]);
-                let ansi = value.as_bytes();
-                stdout.write(ansi).unwrap();                
-            },
-            TerminalApp::Konsole => todo!(),
-            TerminalApp::Unknown => { /* no op */ },
+                osc_set_user_var(stdout, WEZTERM_VAR_TAB_COLOR, &format!("#{:x}", tabcolor));
+            }
+            TerminalApp::Alacritty | TerminalApp::Konsole | TerminalApp::Unknown => { /* no op */ }
         }
     }
 
-    pub fn set_tab_name(&self, stdout: &mut std::io::Stdout, tabname: &str) {
-        eprintln!("Setting tab name to: {}", tabname);
-
+    pub fn set_tab_name(&self, stdout: &mut Stdout, tabname: &str) {
         match self {
-            TerminalApp::Iterm2 => {
-                let tabname = format!("\x1B]0;{}\x07", tabname).into_bytes();
-                stdout.write(&tabname).unwrap();
-            },
-            TerminalApp::Alacritty => todo!(),
+            TerminalApp::Iterm2 | TerminalApp::Alacritty | TerminalApp::Konsole => {
+                let _ = write!(stdout, "\x1B]0;{}\x07", tabname);
+            }
             TerminalApp::Wezterm => {
-                wezterm_cli_runner(&["set-tab-title", tabname]);
-            },
-            TerminalApp::Konsole => {
-
-            },
-            TerminalApp::Unknown => { /* no op */ },
+                wezterm_cli(&["set-tab-title", tabname]);
+            }
+            TerminalApp::Unknown => { /* no op */ }
         }
-    }        
+    }
+
+    /// Set a pane colour (foreground/background/cursor). Same escape sequence on every terminal.
+    pub fn set_pane_color(&self, stdout: &mut Stdout, which: PaneColor, color: &Color) {
+        if *self == TerminalApp::Unknown {
+            return;
+        }
+        let _ = write!(stdout, "\x1B]{};#{:x}\x07", which as u8, color);
+    }
+
+    /// Reset a pane colour to the terminal's scheme default (OSC 110/111/112).
+    pub fn reset_pane_color(&self, stdout: &mut Stdout, which: PaneColor) {
+        if *self == TerminalApp::Unknown {
+            return;
+        }
+        let _ = write!(stdout, "\x1B]{}\x07", which as u8 + 100);
+    }
 }

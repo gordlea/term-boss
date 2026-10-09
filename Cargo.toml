@@ -1,6 +1,6 @@
 # cargo-features = ["profile-rustflags"]
 [package]
-name = "iterm-tab"
+name = "term-boss"
 version = "0.1.0"
 edition = "2024"
 

@@ -15,12 +15,10 @@ pub fn detect_terminal() -> TerminalApp {
         TerminalApp::Unknown
     };
 
-    if term_app == TerminalApp::Unknown {
-        if let Ok(term) = env::var("TERM") {
-            if term.contains("alacritty") {
-                term_app = TerminalApp::Alacritty;
-            }
-        }
+    if term_app == TerminalApp::Unknown
+        && env::var("TERM").is_ok_and(|term| term.contains("alacritty"))
+    {
+        term_app = TerminalApp::Alacritty;
     }
 
     if term_app == TerminalApp::Unknown {

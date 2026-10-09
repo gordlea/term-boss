@@ -30,9 +30,9 @@ impl ValueEnum for SetupShell {
     }
 }
 
-const SETUP_ZSH: &'static str =
+const SETUP_ZSH: &str =
 "_iterm_tab_autoload_hook () {\n\
-    iterm-tab set\n\
+    term-boss set\n\
 }\n\
 add-zsh-hook chpwd _iterm_tab_autoload_hook\n\
 ";
@@ -41,7 +41,7 @@ impl SetupShell {
     pub fn output(&self, stdout: &mut std::io::Stdout) {
         match self {
             SetupShell::Zsh => {
-                stdout.write(SETUP_ZSH.as_bytes()).unwrap();
+                let _ = stdout.write_all(SETUP_ZSH.as_bytes());
             }
         }
     }
