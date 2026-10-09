@@ -50,16 +50,25 @@ fn main() -> anyhow::Result<()> {
 
             let config = read_hierarchial_config(cli_set_config)?;
 
+            // A terminal with tabs but no badge shows the badge in the title: `name [badge]`.
+            let badge_in_title = config.badgetext.is_some() && !terminal_app.supports_badge();
+            let badge_for_title = if badge_in_title { config.badgetext.as_deref() } else { None };
+            let tabname = match (&config.tabname, badge_for_title) {
+                (Some(name), Some(badge)) => Some(format!("{name} [{badge}]")),
+                (None, Some(badge)) => Some(format!("[{badge}]")),
+                (name, None) => name.clone(),
+            };
+
             if config.reset {
                 // Only reset what is not about to be set, so a `cd` doesn't flicker
                 // (and doesn't spawn `wezterm cli` twice).
                 if config.tabcolor.is_none() {
                     terminal_app.reset_tab_color(&mut stdout);
                 }
-                if config.tabname.is_none() {
+                if tabname.is_none() {
                     terminal_app.reset_tab_name(&mut stdout);
                 }
-                if config.badgetext.is_none() {
+                if config.badgetext.is_none() && terminal_app.supports_badge() {
                     terminal_app.set_badge_text(&mut stdout, "");
                 }
                 if config.fgcolor.is_none() {
@@ -84,10 +93,10 @@ fn main() -> anyhow::Result<()> {
             if let Some(tabcolor) = &config.tabcolor {
                 terminal_app.set_tab_bg_color(&mut stdout, tabcolor);
             }
-            if let Some(badgetext) = &config.badgetext {
+            if let (Some(badgetext), false) = (&config.badgetext, badge_in_title) {
                 terminal_app.set_badge_text(&mut stdout, badgetext);
             }
-            if let Some(tabname) = &config.tabname {
+            if let Some(tabname) = &tabname {
                 terminal_app.set_tab_name(&mut stdout, tabname);
             }
             if let Some(color) = &config.fgcolor {

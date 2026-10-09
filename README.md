@@ -80,7 +80,7 @@ term-boss set [OPTIONS]
 |---|---|---|
 | `--tabname <text>` | `TERM_BOSS_NAME` | Tab title |
 | `--tabcolor <colour>` | `TERM_BOSS_BG_COLOR` | Tab background colour |
-| `--badgetext <text>` | `TERM_BOSS_BADGETEXT` | iTerm2 badge, or WezTerm right-status text |
+| `--badgetext <text>` | `TERM_BOSS_BADGETEXT` | iTerm2 badge, WezTerm right-status text, Konsole badge; elsewhere appended to the tab title as `name [badge]` |
 | `--fgcolor <colour>` | `TERM_BOSS_PANE_FG` | Pane foreground (OSC 10) |
 | `--bgcolor <colour>` | `TERM_BOSS_PANE_BG` | Pane background (OSC 11) |
 | `--cursorcolor <colour>` | `TERM_BOSS_PANE_CURSOR` | Cursor colour (OSC 12) |
@@ -292,14 +292,15 @@ repositories, so they are treated as untrusted:
 
 | | iTerm2 | WezTerm | Alacritty | Konsole |
 |---|---|---|---|---|
-| Tab colour | ✓ | ✓ (Lua module) | | ✓ (OSC 34) |
-| Tab name | ✓ | ✓ (`wezterm cli`) | ✓ | ✓ (OSC 30) |
-| Badge text | ✓ | ✓ (right status) | | ✓ (D-Bus) |
+| Tab colour | ✓ | ✓ (Lua module) | n/a (no tabs) | ✓ (OSC 34) |
+| Tab name | ✓ | ✓ (`wezterm cli`) | ✓ (window title) | ✓ (OSC 30) |
+| Badge text | ✓ | ✓ (right status) | in tab title | ✓ (D-Bus, else in tab title) |
 | Pane fg / bg / cursor | ✓ | ✓ | ✓ | ✓ |
 | ANSI palette | ✓ | ✓ | ✓ | ✓ |
 
-The terminal is detected from `TERM_PROGRAM`, `TERM`, `KONSOLE_VERSION`, `WEZTERM_PANE` and
-`ITERM_SESSION_ID`. In an unrecognised terminal `term-boss set` exits silently without
+The terminal is detected from `TERM_PROGRAM`, `TERM`, `KONSOLE_VERSION`, `ALACRITTY_WINDOW_ID`,
+`WEZTERM_PANE` and `ITERM_SESSION_ID`. Alacritty is recognised even when its config sets `TERM`
+to `xterm-256color`. In an unrecognised terminal `term-boss set` exits silently without
 emitting anything.
 
 Konsole notes: the tab title uses Konsole's own OSC 30, so it shows regardless of the profile's

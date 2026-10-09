@@ -104,6 +104,16 @@ pub fn run(cli: &SetConfig, stdout: &mut Stdout) -> Result<()> {
     for line in describe(&resolution.config, true) {
         writeln!(stdout, "  {line}")?;
     }
+    if let Some(badge) = &resolution.config.badgetext
+        && terminal.supports_tab_name()
+        && !terminal.supports_badge()
+    {
+        let title = match &resolution.config.tabname {
+            Some(name) => format!("{name} [{badge}]"),
+            None => format!("[{badge}]"),
+        };
+        writeln!(stdout, "  note: {terminal:?} has no badge, so the tab title becomes {title:?}")?;
+    }
     Ok(())
 }
 

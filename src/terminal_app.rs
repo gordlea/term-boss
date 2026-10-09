@@ -57,6 +57,10 @@ enum DbusArg<'a> {
     Bool(bool),
 }
 
+pub fn konsole_dbus_available() -> bool {
+    env::var_os("KONSOLE_DBUS_SERVICE").is_some() && env::var_os("KONSOLE_DBUS_SESSION").is_some()
+}
+
 /// Call `method` on the Konsole session that owns this shell. Uses `dbus-send` (ships with D-Bus)
 /// and falls back to `busctl` (systemd) if that is missing. Silent no-op without the env vars.
 fn konsole_dbus(method: &str, args: &[DbusArg]) {
@@ -115,6 +119,21 @@ pub enum PaneColor {
 }
 
 impl TerminalApp {
+    /// Can this terminal show a tab title at all?
+    pub fn supports_tab_name(&self) -> bool {
+        !matches!(self, TerminalApp::Unknown)
+    }
+
+    /// Can this terminal show badge text somewhere other than the tab title? Konsole can only
+    /// via D-Bus, so it counts only when Konsole exported the bus coordinates.
+    pub fn supports_badge(&self) -> bool {
+        match self {
+            TerminalApp::Iterm2 | TerminalApp::Wezterm => true,
+            TerminalApp::Konsole => konsole_dbus_available(),
+            TerminalApp::Alacritty | TerminalApp::Unknown => false,
+        }
+    }
+
     pub fn reset_tab_color(&self, stdout: &mut Stdout) {
         match self {
             TerminalApp::Iterm2 => {
