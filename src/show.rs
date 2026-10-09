@@ -22,6 +22,14 @@ pub fn run(cli: &SetConfig, stdout: &mut Stdout) -> Result<()> {
     for (var, value) in detect::detection_evidence() {
         writeln!(stdout, "  {var}={}", value.as_deref().unwrap_or("(unset)"))?;
     }
+    if terminal == TerminalApp::Konsole {
+        let dbus = env::var_os("KONSOLE_DBUS_SERVICE").is_some() && env::var_os("KONSOLE_DBUS_SESSION").is_some();
+        if dbus {
+            writeln!(stdout, "  D-Bus (badge, tab-colour reset): available")?;
+        } else {
+            writeln!(stdout, "  D-Bus (badge, tab-colour reset): unavailable (KONSOLE_DBUS_SERVICE / KONSOLE_DBUS_SESSION not set)")?;
+        }
+    }
     if terminal == TerminalApp::Wezterm {
         match setup_wezterm::module_status() {
             Ok(status) => {

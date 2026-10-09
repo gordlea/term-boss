@@ -2,8 +2,17 @@ use std::env;
 
 use crate::terminal_app::TerminalApp;
 
-/// Environment variables `detect_terminal` consults, for diagnostics.
-pub const DETECTION_VARS: [&str; 5] = ["TERM_PROGRAM", "TERM", "KONSOLE_VERSION", "WEZTERM_PANE", "ITERM_SESSION_ID"];
+/// Environment variables shown by `term-boss show`: the ones `detect_terminal` consults, plus the
+/// Konsole D-Bus coordinates its badge and tab-colour reset need.
+pub const DETECTION_VARS: [&str; 7] = [
+    "TERM_PROGRAM",
+    "TERM",
+    "KONSOLE_VERSION",
+    "WEZTERM_PANE",
+    "ITERM_SESSION_ID",
+    "KONSOLE_DBUS_SERVICE",
+    "KONSOLE_DBUS_SESSION",
+];
 
 pub fn detection_evidence() -> Vec<(&'static str, Option<String>)> {
     DETECTION_VARS.iter().map(|var| (*var, env::var(var).ok())).collect()

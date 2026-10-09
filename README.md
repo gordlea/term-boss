@@ -292,15 +292,22 @@ repositories, so they are treated as untrusted:
 
 | | iTerm2 | WezTerm | Alacritty | Konsole |
 |---|---|---|---|---|
-| Tab colour | ✓ | ✓ (Lua module) | | |
-| Tab name | ✓ | ✓ (`wezterm cli`) | ✓ | ✓ |
-| Badge text | ✓ | ✓ (right status) | | |
+| Tab colour | ✓ | ✓ (Lua module) | | ✓ (OSC 34) |
+| Tab name | ✓ | ✓ (`wezterm cli`) | ✓ | ✓ (OSC 30) |
+| Badge text | ✓ | ✓ (right status) | | ✓ (D-Bus) |
 | Pane fg / bg / cursor | ✓ | ✓ | ✓ | ✓ |
 | ANSI palette | ✓ | ✓ | ✓ | ✓ |
 
 The terminal is detected from `TERM_PROGRAM`, `TERM`, `KONSOLE_VERSION`, `WEZTERM_PANE` and
 `ITERM_SESSION_ID`. In an unrecognised terminal `term-boss set` exits silently without
 emitting anything.
+
+Konsole notes: the tab title uses Konsole's own OSC 30, so it shows regardless of the profile's
+title format, and resetting it restores Konsole's default format `%d : %n`. Konsole expands
+`%` tokens in titles, so avoid `%` in a tab name. The badge and clearing the tab colour go
+through Konsole's session D-Bus interface, using `dbus-send` or `busctl`, which Konsole
+advertises to the shell as `KONSOLE_DBUS_SERVICE` and `KONSOLE_DBUS_SESSION`. Verified on
+Konsole 26.08; older releases ignore the sequences they do not know.
 
 ## Development
 

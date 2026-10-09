@@ -1,6 +1,7 @@
 use std::{
     borrow::Cow,
-    io::{Stdout, Write},
+    env,
+    io::{ErrorKind, Stdout, Write},
     process::{Command, Stdio},
 };
 
@@ -32,16 +33,66 @@ fn osc_set_user_var(stdout: &mut Stdout, name: &str, value: &str) {
     let _ = write!(stdout, "\x1B]1337;SetUserVar={}={}\x07", name, encoded);
 }
 
+/// Detach a helper process from the terminal so nothing leaks into the shell on every `cd`.
+fn quiet(mut cmd: Command) -> Command {
+    cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    cmd
+}
+
 /// Run `wezterm cli <args>` for the current pane (wezterm reads WEZTERM_PANE from the env).
-/// Output is discarded so nothing leaks into the shell on every `cd`.
 fn wezterm_cli(args: &[&str]) {
-    let _ = Command::new("wezterm")
-        .arg("cli")
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
+    let mut cmd = Command::new("wezterm");
+    cmd.arg("cli").args(args);
+    let _ = quiet(cmd).status();
+}
+
+/// Konsole's per-session D-Bus interface. Konsole exports the bus name and object path of the
+/// session that owns this shell as KONSOLE_DBUS_SERVICE / KONSOLE_DBUS_SESSION.
+const KONSOLE_DBUS_IFACE: &str = "org.kde.konsole.Session";
+/// Konsole's built-in default tab title format, restored by `reset_tab_name`.
+const KONSOLE_DEFAULT_TAB_FORMAT: &str = "%d : %n";
+
+enum DbusArg<'a> {
+    Str(&'a str),
+    Bool(bool),
+}
+
+/// Call `method` on the Konsole session that owns this shell. Uses `dbus-send` (ships with D-Bus)
+/// and falls back to `busctl` (systemd) if that is missing. Silent no-op without the env vars.
+fn konsole_dbus(method: &str, args: &[DbusArg]) {
+    let (Ok(service), Ok(path)) = (env::var("KONSOLE_DBUS_SERVICE"), env::var("KONSOLE_DBUS_SESSION")) else {
+        return;
+    };
+
+    let mut cmd = Command::new("dbus-send");
+    cmd.args(["--session", "--type=method_call", &format!("--dest={service}"), &path, &format!("{KONSOLE_DBUS_IFACE}.{method}")]);
+    for arg in args {
+        cmd.arg(match arg {
+            DbusArg::Str(s) => format!("string:{s}"),
+            DbusArg::Bool(b) => format!("boolean:{b}"),
+        });
+    }
+    match quiet(cmd).status() {
+        Err(e) if e.kind() == ErrorKind::NotFound => { /* try busctl */ }
+        _ => return,
+    }
+
+    let signature: String = args
+        .iter()
+        .map(|arg| match arg {
+            DbusArg::Str(_) => 's',
+            DbusArg::Bool(_) => 'b',
+        })
+        .collect();
+    let mut cmd = Command::new("busctl");
+    cmd.args(["--user", "call", &service, &path, KONSOLE_DBUS_IFACE, method, &signature]);
+    for arg in args {
+        cmd.arg(match arg {
+            DbusArg::Str(s) => (*s).to_string(),
+            DbusArg::Bool(b) => b.to_string(),
+        });
+    }
+    let _ = quiet(cmd).status();
 }
 
 #[derive(Debug, PartialEq, Eq, Default)]
@@ -72,14 +123,24 @@ impl TerminalApp {
             TerminalApp::Wezterm => {
                 osc_set_user_var(stdout, WEZTERM_VAR_TAB_COLOR, "");
             }
-            TerminalApp::Alacritty | TerminalApp::Konsole | TerminalApp::Unknown => { /* no op */ }
+            TerminalApp::Konsole => {
+                // OSC 34 ignores an empty/invalid colour, so clearing needs D-Bus: an empty
+                // string becomes an invalid QColor, which is Konsole's "no tab colour".
+                konsole_dbus("setTabColor", &[DbusArg::Str("")]);
+            }
+            TerminalApp::Alacritty | TerminalApp::Unknown => { /* no op */ }
         }
     }
 
     pub fn reset_tab_name(&self, stdout: &mut Stdout) {
         match self {
-            TerminalApp::Iterm2 | TerminalApp::Alacritty | TerminalApp::Konsole => {
+            TerminalApp::Iterm2 | TerminalApp::Alacritty => {
                 let _ = stdout.write_all(OSC0_RESET_TAB_NAME.as_bytes());
+            }
+            TerminalApp::Konsole => {
+                // Restore Konsole's default title format (a profile with a custom format gets
+                // the built-in default instead; the format is not readable from the shell).
+                let _ = write!(stdout, "\x1B]30;{}\x07", KONSOLE_DEFAULT_TAB_FORMAT);
             }
             TerminalApp::Wezterm => {
                 // An empty tab title makes wezterm fall back to the active pane's title.
@@ -100,7 +161,16 @@ impl TerminalApp {
                 // Shown in the right status area by termboss.lua; empty clears it.
                 osc_set_user_var(stdout, WEZTERM_VAR_TAB_BADGE, badgetext);
             }
-            TerminalApp::Alacritty | TerminalApp::Konsole | TerminalApp::Unknown => { /* no op */ }
+            TerminalApp::Konsole => {
+                // Konsole's badge (an overlay in the view, like iTerm2's) is D-Bus only.
+                if badgetext.is_empty() {
+                    konsole_dbus("setBadgeEnabled", &[DbusArg::Bool(false)]);
+                } else {
+                    konsole_dbus("setBadgeText", &[DbusArg::Str(badgetext)]);
+                    konsole_dbus("setBadgeEnabled", &[DbusArg::Bool(true)]);
+                }
+            }
+            TerminalApp::Alacritty | TerminalApp::Unknown => { /* no op */ }
         }
     }
 
@@ -115,15 +185,24 @@ impl TerminalApp {
             TerminalApp::Wezterm => {
                 osc_set_user_var(stdout, WEZTERM_VAR_TAB_COLOR, &format!("#{:x}", tabcolor));
             }
-            TerminalApp::Alacritty | TerminalApp::Konsole | TerminalApp::Unknown => { /* no op */ }
+            TerminalApp::Konsole => {
+                // Konsole-specific OSC 34 "session colour" = tab colour.
+                let _ = write!(stdout, "\x1B]34;#{:x}\x07", tabcolor);
+            }
+            TerminalApp::Alacritty | TerminalApp::Unknown => { /* no op */ }
         }
     }
 
     pub fn set_tab_name(&self, stdout: &mut Stdout, tabname: &str) {
         let tabname = &*sanitize(tabname);
         match self {
-            TerminalApp::Iterm2 | TerminalApp::Alacritty | TerminalApp::Konsole => {
+            TerminalApp::Iterm2 | TerminalApp::Alacritty => {
                 let _ = write!(stdout, "\x1B]0;{}\x07", tabname);
+            }
+            TerminalApp::Konsole => {
+                // Konsole-specific OSC 30 sets the tab title directly. OSC 0 only sets the window
+                // title, which the default tab format ("%d : %n") does not show.
+                let _ = write!(stdout, "\x1B]30;{}\x07", tabname);
             }
             TerminalApp::Wezterm => {
                 wezterm_cli(&["set-tab-title", tabname]);
