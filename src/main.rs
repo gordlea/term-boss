@@ -1,7 +1,8 @@
 use std::io::Write;
 
 use clap::{Parser, Subcommand};
-use config::{SetConfig, read_hierarchial_config};
+use config::{SetConfig, TermColorMapping, read_hierarchial_config};
+use strum::VariantArray;
 
 use crate::terminal_app::{PaneColor, TerminalApp};
 
@@ -64,6 +65,14 @@ fn main() -> anyhow::Result<()> {
                 if config.cursorcolor.is_none() {
                     terminal_app.reset_pane_color(&mut stdout, PaneColor::Cursor);
                 }
+                let mapped = config.color_mapping.as_ref();
+                terminal_app.reset_palette_colors(
+                    &mut stdout,
+                    TermColorMapping::VARIANTS
+                        .iter()
+                        .copied()
+                        .filter(|slot| !mapped.is_some_and(|m| m.contains_key(slot))),
+                );
             }
 
             if let Some(tabcolor) = &config.tabcolor {
@@ -83,6 +92,9 @@ fn main() -> anyhow::Result<()> {
             }
             if let Some(color) = &config.cursorcolor {
                 terminal_app.set_pane_color(&mut stdout, PaneColor::Cursor, color);
+            }
+            for (slot, color) in config.color_mapping.iter().flatten() {
+                terminal_app.set_palette_color(&mut stdout, *slot, color);
             }
         }
         Commands::Env(env_config) => {

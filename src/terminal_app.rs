@@ -5,7 +5,7 @@ use std::{
 
 use base64::{Engine, engine::general_purpose::STANDARD};
 
-use crate::colors::Color;
+use crate::{colors::ColorSpec, config::TermColorMapping};
 
 const ITERM2_RESET_BG_COLOR_ANSI: &str = "\x1B]6;1;bg;*;default\x07";
 const OSC0_RESET_TAB_NAME: &str = "\x1B]0;\x07";
@@ -92,7 +92,7 @@ impl TerminalApp {
         }
     }
 
-    pub fn set_tab_bg_color(&self, stdout: &mut Stdout, tabcolor: &Color) {
+    pub fn set_tab_bg_color(&self, stdout: &mut Stdout, tabcolor: &ColorSpec) {
         match self {
             TerminalApp::Iterm2 => {
                 let [r, g, b] = tabcolor.get_rgb();
@@ -120,7 +120,7 @@ impl TerminalApp {
     }
 
     /// Set a pane colour (foreground/background/cursor). Same escape sequence on every terminal.
-    pub fn set_pane_color(&self, stdout: &mut Stdout, which: PaneColor, color: &Color) {
+    pub fn set_pane_color(&self, stdout: &mut Stdout, which: PaneColor, color: &ColorSpec) {
         if *self == TerminalApp::Unknown {
             return;
         }
@@ -133,5 +133,29 @@ impl TerminalApp {
             return;
         }
         let _ = write!(stdout, "\x1B]{}\x07", which as u8 + 100);
+    }
+
+    /// Set one ANSI palette slot (OSC 4). Same escape sequence on every terminal.
+    pub fn set_palette_color(&self, stdout: &mut Stdout, slot: TermColorMapping, color: &ColorSpec) {
+        if *self == TerminalApp::Unknown {
+            return;
+        }
+        let _ = write!(stdout, "\x1B]4;{};#{:x}\x07", slot as u8, color);
+    }
+
+    /// Reset the given palette slots to the terminal's defaults in one OSC 104 sequence.
+    pub fn reset_palette_colors(&self, stdout: &mut Stdout, slots: impl Iterator<Item = TermColorMapping>) {
+        if *self == TerminalApp::Unknown {
+            return;
+        }
+        let mut seq = String::from("\x1B]104");
+        for slot in slots {
+            seq.push(';');
+            seq.push_str(&(slot as u8).to_string());
+        }
+        if seq.len() > 5 {
+            seq.push('\x07');
+            let _ = stdout.write_all(seq.as_bytes());
+        }
     }
 }
