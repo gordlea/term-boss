@@ -52,5 +52,14 @@ pub fn detect_terminal() -> TerminalApp {
         }
     }
 
+    if term_app == TerminalApp::Unknown {
+        // Anything else that looks like a real terminal gets the standard escapes. TERM unset
+        // or "dumb" (scripts, Emacs shells, CI) means nobody would render them.
+        let term = env::var("TERM").unwrap_or_default();
+        if !term.is_empty() && term != "dumb" {
+            term_app = TerminalApp::Generic;
+        }
+    }
+
     term_app
 }

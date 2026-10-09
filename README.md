@@ -290,25 +290,39 @@ repositories, so they are treated as untrusted:
 
 ## Terminal support
 
-| | iTerm2 | WezTerm | Alacritty | Konsole |
-|---|---|---|---|---|
-| Tab colour | ✓ | ✓ (Lua module) | n/a (no tabs) | ✓ (OSC 34) |
-| Tab name | ✓ | ✓ (`wezterm cli`) | ✓ (window title) | ✓ (OSC 30) |
-| Badge text | ✓ | ✓ (right status) | in tab title | ✓ (D-Bus, else in tab title) |
-| Pane fg / bg / cursor | ✓ | ✓ | ✓ | ✓ |
-| ANSI palette | ✓ | ✓ | ✓ | ✓ |
+Legend: **✓** native support · **title** shown in the tab/window title instead · **–** not
+available · **n/a** the terminal has no such thing.
 
-The terminal is detected from `TERM_PROGRAM`, `TERM`, `KONSOLE_VERSION`, `ALACRITTY_WINDOW_ID`,
-`WEZTERM_PANE` and `ITERM_SESSION_ID`. Alacritty is recognised even when its config sets `TERM`
-to `xterm-256color`. In an unrecognised terminal `term-boss set` exits silently without
-emitting anything.
+| Feature | iTerm2 | WezTerm | Alacritty | Konsole | Other* |
+|---|---|---|---|---|---|
+| Detected by | `TERM_PROGRAM=iTerm.app` or `ITERM_SESSION_ID` | `TERM_PROGRAM=WezTerm` or `WEZTERM_PANE` | `ALACRITTY_WINDOW_ID`, `ALACRITTY_SOCKET` or `TERM` containing `alacritty` | `KONSOLE_VERSION` | any other `TERM` except `dumb` |
+| Tab colour | ✓ OSC 6 | ✓ user var + Lua module | n/a (no tabs) | ✓ OSC 34 | – |
+| Tab name | ✓ OSC 0 | ✓ `wezterm cli set-tab-title` | ✓ OSC 0 (window title) | ✓ OSC 30 | ✓ OSC 0 (window title) |
+| Badge text | ✓ OSC 1337 badge | ✓ user var, right status | title | ✓ D-Bus badge overlay; title if D-Bus is unavailable | title |
+| Pane foreground / background / cursor | ✓ OSC 10 / 11 / 12 | ✓ | ✓ | ✓ | ✓ |
+| 16-colour ANSI palette | ✓ OSC 4 | ✓ | ✓ | ✓ | ✓ |
+| `reset` of the above | ✓ | ✓ | ✓ | ✓ (tab colour via D-Bus; title → `%d : %n`) | ✓ |
+| Extra setup | – | `term-boss setup wezterm` once | – | `dbus-send` or `busctl` on PATH for badge and tab-colour reset | – |
+| Verified on | not re-tested here (original target) | 20261005 | 0.17 | 26.08 | xterm 411 |
+
+\* Any unrecognised terminal (xterm, kitty, foot, GNOME Terminal, Ghostty, Windows Terminal,
+…) gets the standard xterm escapes: OSC 0 for the title, OSC 10/11/12 for pane colours and
+OSC 4 for the palette. When `TERM` is unset or `dumb` (scripts, Emacs shells, CI),
+`term-boss set` exits silently without emitting anything.
+
+Where a terminal has tabs or a window title but no badge, the badge is appended to the title as
+`name [badge]`, or shown alone as `[badge]` when no tab name is set. `term-boss show` prints
+which terminal was detected, the evidence it used, and this fallback when it applies.
+
+Detection checks `TERM_PROGRAM` first, then the terminal-specific variables, then `TERM`.
+Alacritty is recognised even when its config sets `TERM` to `xterm-256color`.
 
 Konsole notes: the tab title uses Konsole's own OSC 30, so it shows regardless of the profile's
 title format, and resetting it restores Konsole's default format `%d : %n`. Konsole expands
 `%` tokens in titles, so avoid `%` in a tab name. The badge and clearing the tab colour go
-through Konsole's session D-Bus interface, using `dbus-send` or `busctl`, which Konsole
-advertises to the shell as `KONSOLE_DBUS_SERVICE` and `KONSOLE_DBUS_SESSION`. Verified on
-Konsole 26.08; older releases ignore the sequences they do not know.
+through Konsole's session D-Bus interface, which Konsole advertises to the shell as
+`KONSOLE_DBUS_SERVICE` and `KONSOLE_DBUS_SESSION`. Older Konsole releases ignore the sequences
+they do not know.
 
 ## Development
 

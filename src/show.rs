@@ -16,7 +16,13 @@ use crate::{
 pub fn run(cli: &SetConfig, stdout: &mut Stdout) -> Result<()> {
     let terminal = detect::detect_terminal();
     match &terminal {
-        TerminalApp::Unknown => writeln!(stdout, "Terminal: Unknown (term-boss set would exit without output)")?,
+        TerminalApp::Unknown => {
+            writeln!(stdout, "Terminal: Unknown (TERM unset or \"dumb\"; term-boss set would exit without output)")?
+        }
+        TerminalApp::Generic => writeln!(
+            stdout,
+            "Terminal: Generic (unrecognised; standard escapes only: title, pane colours, palette; no tab colour or badge)"
+        )?,
         terminal => writeln!(stdout, "Terminal: {terminal:?}")?,
     }
     for (var, value) in detect::detection_evidence() {
