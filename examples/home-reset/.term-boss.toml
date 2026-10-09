@@ -1,0 +1,12 @@
+# Copy this to $HOME/.term-boss.toml.
+#
+# Every directory under your home inherits it, so leaving a themed project (cd ~ or into any
+# directory without its own config) restores the terminal's default tab, colours and palette.
+# Projects that set their own values still win, because nearer configs override farther ones.
+reset = true
+
+# This is also a good place for colour schemes you want available in every project:
+#
+# [color_schemes.mine.colors.primary]
+# background = "#101010"
+# foreground = "#f0f0f0"

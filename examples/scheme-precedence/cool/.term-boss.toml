@@ -1,0 +1,4 @@
+# The nearest scheme selection wins outright: "cool" replaces "warm" entirely. Nothing from
+# "warm" (its cursor colour, its red and yellow slots) leaks through, even though "cool" does
+# not define them.
+scheme = "cool"
