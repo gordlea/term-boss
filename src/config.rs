@@ -5,14 +5,18 @@ use clap::Args;
 use serde::Deserialize;
 use strum::VariantArray;
 
-use crate::colors::ColorSpec;
+use crate::{
+    colors::ColorSpec,
+    scheme::{self, ColorScheme},
+};
 
-const CONFIG_FILE_NAME: &str = ".term-boss.yml";
+const CONFIG_FILE_NAME: &str = ".term-boss.toml";
 
 /// ANSI palette slot -> colour. Any subset of the 16 slots may be given.
 pub type Palette = BTreeMap<TermColorMapping, ColorSpec>;
 
 #[derive(Debug, Deserialize, Default, Args, Clone)]
+#[serde(deny_unknown_fields)]
 /// Reach new heights.
 #[command(version, about, long_about = None)]
 pub struct SetConfig {
@@ -26,8 +30,10 @@ pub struct SetConfig {
     #[arg(long, env = "TERM_BOSS_BADGETEXT")]
     pub badgetext: Option<String>,
 
-    /// Name of a colour scheme defined under `color_schemes` in a .term-boss.yml.
-    /// Explicit colour flags override the scheme's values.
+    /// Name of a colour scheme: defined inline under `color_schemes` in a .term-boss.toml, an
+    /// Alacritty-format `<name>.toml` in ~/.config/term-boss/color_schemes/, or one of WezTerm's
+    /// built-in schemes fetched by `term-boss setup colorschemes`. Only the nearest selection (CLI,
+    /// then cwd, then parents) applies; explicit colour flags override the scheme's values.
     #[arg(long, env = "TERM_BOSS_SCHEME")]
     pub scheme: Option<String>,
 
@@ -52,20 +58,32 @@ pub struct SetConfig {
     #[serde(default)]
     pub reset: bool,
 
-    /// ANSI palette overrides (OSC 4). Config file only; usually comes from a scheme.
+    /// Resolved ANSI palette (OSC 4). Filled from the selected scheme; not a config key.
     #[arg(skip)]
-    #[serde(default)]
+    #[serde(skip)]
     pub color_mapping: Option<Palette>,
 
-    /// Named schemes available for selection via `scheme`. Config file only.
+    /// Inline colour schemes in Alacritty format, keyed by name. Config file only, e.g.
+    ///
+    /// ```toml
+    /// scheme = "solarized_dark"
+    ///
+    /// [color_schemes.solarized_dark.colors.primary]
+    /// background = "#002b36"
+    /// foreground = "#839496"
+    ///
+    /// [color_schemes.solarized_dark.colors.normal]
+    /// black = "#073642"
+    /// red = "#dc322f"
+    /// ```
     #[arg(skip)]
     #[serde(default)]
-    pub color_schemes: Option<Vec<ColorScheme>>,
+    pub color_schemes: Option<BTreeMap<String, ColorScheme>>,
 }
 
 /// The 16 ANSI palette slots; the discriminant is the OSC 4 colour index.
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, VariantArray)]
-#[serde(rename_all = "lowercase")]
+/// Declaration order matters: `VARIANTS[0..8]` are the normal colours, `[8..16]` the bright ones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, VariantArray)]
 #[repr(u8)]
 pub enum TermColorMapping {
     Black = 0,
@@ -84,29 +102,6 @@ pub enum TermColorMapping {
     BrightMagenta = 13,
     BrightCyan = 14,
     BrightWhite = 15,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-pub struct ColorScheme {
-    pub name: String,
-    pub tabcolor: Option<ColorSpec>,
-    pub fgcolor: Option<ColorSpec>,
-    pub bgcolor: Option<ColorSpec>,
-    pub cursorcolor: Option<ColorSpec>,
-    pub color_mapping: Option<Palette>,
-}
-
-impl ColorScheme {
-    fn into_set_config(self) -> SetConfig {
-        SetConfig {
-            tabcolor: self.tabcolor,
-            fgcolor: self.fgcolor,
-            bgcolor: self.bgcolor,
-            cursorcolor: self.cursorcolor,
-            color_mapping: self.color_mapping,
-            ..Default::default()
-        }
-    }
 }
 
 fn merge_field<T>(mine: &mut Option<T>, theirs: Option<T>, replace: bool) {
@@ -137,11 +132,49 @@ impl SetConfig {
     }
 }
 
-/// Merge the CLI/env config with every `.term-boss.yml` from the current directory up to `/`.
+/// Find the scheme called `name`: inline definitions (nearest first) shadow files in the
+/// scheme directory.
+fn find_scheme(name: &str, inline: &[(String, ColorScheme)]) -> Result<ColorScheme> {
+    if let Some((_, scheme)) = inline.iter().find(|(n, _)| n == name) {
+        return Ok(scheme.clone());
+    }
+    if let Some(scheme) = scheme::load_from_dir(name)? {
+        return Ok(scheme);
+    }
+    let mut known: Vec<String> = inline.iter().map(|(n, _)| n.clone()).collect();
+    known.extend(scheme::list_dir_names());
+    known.sort();
+    known.dedup();
+    let hint = if scheme::library_installed() {
+        String::new()
+    } else {
+        format!(
+            "\nRun `term-boss setup colorschemes` to fetch ~1000 schemes from WezTerm's built-in collection ({}).",
+            scheme::LIBRARY_REPO
+        )
+    };
+    if known.is_empty() {
+        let dir = scheme::config_dir()
+            .map(|d| d.join(scheme::SCHEME_DIR).display().to_string())
+            .unwrap_or_default();
+        bail!("Unknown color scheme {:?}; no schemes are defined inline or in {}{}", name, dir, hint);
+    }
+    const MAX_LISTED: usize = 20;
+    let more = known.len().saturating_sub(MAX_LISTED);
+    let mut listed = known[..known.len().min(MAX_LISTED)].join(", ");
+    if more > 0 {
+        listed.push_str(&format!(" … and {more} more"));
+    }
+    bail!("Unknown color scheme {:?}; known schemes: {}{}", name, listed, hint);
+}
+
+/// Merge the CLI/env config with every `.term-boss.toml` from the current directory up to `/`.
 ///
-/// Resolution is per level, nearest first (CLI, then cwd, then each parent): a level's own
-/// fields override its selected `scheme`, and a nearer level overrides a farther one field by
-/// field. Schemes may be defined at any level and are looked up across all of them.
+/// Resolution is per level, nearest first (CLI, then cwd, then each parent): a nearer level
+/// overrides a farther one field by field. Only the nearest level that selects a `scheme` has
+/// it applied, beneath that level's own fields; farther levels' selections are ignored so two
+/// schemes never blend. Inline schemes may be defined at any level and shadow files in the
+/// scheme directory.
 pub fn read_hierarchial_config(cli_set_config: &SetConfig) -> Result<SetConfig> {
     let mut current_dir = env::current_dir().context("Unable to determine current dir!")?;
 
@@ -150,7 +183,7 @@ pub fn read_hierarchial_config(cli_set_config: &SetConfig) -> Result<SetConfig> 
     loop {
         let candidate = current_dir.join(CONFIG_FILE_NAME);
         if let Ok(contents) = fs::read_to_string(&candidate) {
-            let read_config = serde_yml::from_str(&contents)
+            let read_config = toml::from_str(&contents)
                 .with_context(|| format!("Unable to read file {:?} as a valid config file", candidate))?;
             levels.push(read_config);
         }
@@ -160,19 +193,18 @@ pub fn read_hierarchial_config(cli_set_config: &SetConfig) -> Result<SetConfig> 
     }
 
     // Nearest definitions first, so `find` picks the closest scheme with a given name.
-    let schemes: Vec<ColorScheme> = levels
+    let inline: Vec<(String, ColorScheme)> = levels
         .iter_mut()
         .flat_map(|level| level.color_schemes.take().unwrap_or_default())
         .collect();
 
     let mut merged: Option<SetConfig> = None;
+    let mut scheme_applied = false;
     for mut level in levels {
-        if let Some(name) = &level.scheme {
-            let Some(scheme) = schemes.iter().find(|s| &s.name == name) else {
-                let known: Vec<&str> = schemes.iter().map(|s| s.name.as_str()).collect();
-                bail!("Unknown color scheme {:?}; known schemes: {}", name, known.join(", "));
-            };
-            level.merge(scheme.clone().into_set_config(), false);
+        if let (Some(name), false) = (&level.scheme, scheme_applied) {
+            let scheme = find_scheme(name, &inline)?;
+            level.merge(scheme.into_set_config(), false);
+            scheme_applied = true;
         }
         match merged.as_mut() {
             Some(m) => m.merge(level, false),

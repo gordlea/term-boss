@@ -10,6 +10,9 @@ mod colors;
 mod config;
 mod detect;
 mod setup_shell;
+mod scheme;
+mod setup;
+mod setup_colorschemes;
 mod setup_wezterm;
 mod terminal_app;
 
@@ -23,12 +26,12 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Apply tab/pane settings from CLI flags, env vars and .term-boss.yml files
+    /// Apply tab/pane settings from CLI flags, env vars and .term-boss.toml files
     Set(SetConfig),
     /// Print the shell hook that runs `term-boss set` on every directory change
     Env(setup_shell::EnvConfig),
     /// Install terminal-side integration (e.g. the wezterm Lua module)
-    Setup(setup_wezterm::SetupConfig),
+    Setup(setup::SetupConfig),
 }
 
 fn main() -> anyhow::Result<()> {
@@ -101,7 +104,7 @@ fn main() -> anyhow::Result<()> {
             env_config.shell.output(&mut stdout);
         }
         Commands::Setup(setup_config) => {
-            setup_config.target.install(&mut stdout)?;
+            setup_config.install(&mut stdout)?;
         }
     }
     stdout.flush()?;

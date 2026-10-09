@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     io::{Stdout, Write},
     process::{Command, Stdio},
 };
@@ -6,6 +7,16 @@ use std::{
 use base64::{Engine, engine::general_purpose::STANDARD};
 
 use crate::{colors::ColorSpec, config::TermColorMapping};
+
+/// Drop control characters (C0, DEL, C1) from user text. Config files are untrusted: a BEL or ESC
+/// inside a tab name would otherwise terminate the OSC early and inject arbitrary sequences.
+fn sanitize(text: &str) -> Cow<'_, str> {
+    if text.chars().any(char::is_control) {
+        Cow::Owned(text.chars().filter(|c| !c.is_control()).collect())
+    } else {
+        Cow::Borrowed(text)
+    }
+}
 
 const ITERM2_RESET_BG_COLOR_ANSI: &str = "\x1B]6;1;bg;*;default\x07";
 const OSC0_RESET_TAB_NAME: &str = "\x1B]0;\x07";
@@ -79,6 +90,7 @@ impl TerminalApp {
     }
 
     pub fn set_badge_text(&self, stdout: &mut Stdout, badgetext: &str) {
+        let badgetext = &*sanitize(badgetext);
         match self {
             TerminalApp::Iterm2 => {
                 let encoded = STANDARD.encode(badgetext.as_bytes());
@@ -108,6 +120,7 @@ impl TerminalApp {
     }
 
     pub fn set_tab_name(&self, stdout: &mut Stdout, tabname: &str) {
+        let tabname = &*sanitize(tabname);
         match self {
             TerminalApp::Iterm2 | TerminalApp::Alacritty | TerminalApp::Konsole => {
                 let _ = write!(stdout, "\x1B]0;{}\x07", tabname);

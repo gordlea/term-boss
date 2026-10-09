@@ -8,8 +8,8 @@ use strum::{IntoStaticStr, VariantArray};
 
 pub type ColorValue = [u8; 3];
 
-/// A colour given either as a CSS name, `#rgb`/`#rrggbb` hex, or `rgb(r, g, b)`.
-/// Parsed from the CLI via `FromStr` and from YAML via `TryFrom<String>`.
+/// A colour given as a CSS name, `#rgb`/`#rrggbb` hex, Alacritty-style `0xrrggbb`, or
+/// `rgb(r, g, b)`. Parsed from the CLI via `FromStr` and from TOML via `TryFrom<String>`.
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(try_from = "String")]
 pub enum ColorSpec {
@@ -26,10 +26,27 @@ impl ColorSpec {
     }
 }
 
-const COLOR_ERR: &str = "expected a CSS colour name, #rgb, #rrggbb or rgb(r, g, b)";
+const COLOR_ERR: &str = "expected a CSS colour name, #rgb, #rrggbb, 0xrrggbb or rgb(r, g, b)";
 
 fn hex_byte(s: &str) -> Option<u8> {
-    u8::from_str_radix(s, 16).ok()
+    // `from_str_radix` would also accept a leading `+`.
+    s.bytes().all(|b| b.is_ascii_hexdigit()).then(|| u8::from_str_radix(s, 16).ok())?
+}
+
+/// `rgb` or `rrggbb` hex digits (no prefix).
+fn parse_hex(hex: &str) -> Option<ColorValue> {
+    if !hex.is_ascii() {
+        return None;
+    }
+    let parts = match hex.len() {
+        3 => [0, 1, 2].map(|i| hex_byte(&hex[i..i + 1]).map(|n| n * 17)),
+        6 => [0, 2, 4].map(|i| hex_byte(&hex[i..i + 2])),
+        _ => return None,
+    };
+    match parts {
+        [Some(r), Some(g), Some(b)] => Some([r, g, b]),
+        _ => None,
+    }
 }
 
 impl FromStr for ColorSpec {
@@ -37,18 +54,10 @@ impl FromStr for ColorSpec {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let s = s.trim();
-        if let Some(hex) = s.strip_prefix('#') {
-            let rgb = match hex.len() {
-                3 => [0, 1, 2].map(|i| hex_byte(&hex[i..i + 1]).map(|n| n * 17)),
-                6 => [0, 2, 4].map(|i| hex_byte(&hex[i..i + 2])),
-                _ => return Err(COLOR_ERR),
-            };
-            return match rgb {
-                [Some(r), Some(g), Some(b)] => Ok(ColorSpec::Rgb([r, g, b])),
-                _ => Err(COLOR_ERR),
-            };
+        if let Some(hex) = s.strip_prefix('#').or_else(|| s.strip_prefix("0x")).or_else(|| s.strip_prefix("0X")) {
+            return parse_hex(hex).map(ColorSpec::Rgb).ok_or(COLOR_ERR);
         }
-        if s.len() >= 5 && s[..4].eq_ignore_ascii_case("rgb(") && s.ends_with(')') {
+        if s.get(..4).is_some_and(|p| p.eq_ignore_ascii_case("rgb(")) && s.ends_with(')') {
             let mut parts = s[4..s.len() - 1].split(',').map(|p| p.trim().parse::<u8>().ok());
             return match (parts.next(), parts.next(), parts.next(), parts.next()) {
                 (Some(Some(r)), Some(Some(g)), Some(Some(b)), None) => Ok(ColorSpec::Rgb([r, g, b])),

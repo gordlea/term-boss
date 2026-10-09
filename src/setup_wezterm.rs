@@ -1,36 +1,9 @@
 use std::{env, fs, io::Write, path::PathBuf};
 
 use anyhow::{Context, Result};
-use clap::{Args, ValueEnum};
-use strum::{IntoStaticStr, VariantArray};
 
 const TERMBOSS_LUA: &str = include_str!("termboss.lua");
 const MODULE_FILE_NAME: &str = "termboss.lua";
-
-#[derive(Debug, Default, Args, Clone)]
-pub struct SetupConfig {
-    /// Which terminal integration to install.
-    pub target: SetupTarget,
-}
-
-#[derive(Debug, Clone, IntoStaticStr, VariantArray, Default)]
-#[repr(u8)]
-#[strum(ascii_case_insensitive, serialize_all = "lowercase")]
-pub enum SetupTarget {
-    #[default]
-    Wezterm,
-}
-
-impl ValueEnum for SetupTarget {
-    fn value_variants<'a>() -> &'a [Self] {
-        SetupTarget::VARIANTS
-    }
-
-    fn to_possible_value(&self) -> Option<clap::builder::PossibleValue> {
-        let x: &'static str = self.into();
-        Some(clap::builder::PossibleValue::new(x))
-    }
-}
 
 /// Mirrors wezterm's own lookup: $WEZTERM_CONFIG_DIR, then $XDG_CONFIG_HOME/wezterm,
 /// then $HOME/.config/wezterm. Modules in this directory are on wezterm's Lua package.path.
@@ -45,15 +18,7 @@ fn wezterm_config_dir() -> Result<PathBuf> {
     Ok(PathBuf::from(home).join(".config").join("wezterm"))
 }
 
-impl SetupTarget {
-    pub fn install(&self, stdout: &mut std::io::Stdout) -> Result<()> {
-        match self {
-            SetupTarget::Wezterm => install_wezterm(stdout),
-        }
-    }
-}
-
-fn install_wezterm(stdout: &mut std::io::Stdout) -> Result<()> {
+pub fn install_wezterm(stdout: &mut std::io::Stdout) -> Result<()> {
     let dir = wezterm_config_dir()?;
     fs::create_dir_all(&dir).with_context(|| format!("unable to create {}", dir.display()))?;
 
