@@ -1,5 +1,5 @@
 use std::{
-    fmt::{self, Formatter, LowerHex},
+    fmt::{self, Display, Formatter, LowerHex},
     str::FromStr,
 };
 
@@ -77,6 +77,16 @@ impl TryFrom<String> for ColorSpec {
 
     fn try_from(s: String) -> Result<Self, Self::Error> {
         s.parse()
+    }
+}
+
+/// Human-readable form for diagnostics: `#rrggbb`, or `name (#rrggbb)` for named colours.
+impl Display for ColorSpec {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match self {
+            ColorSpec::Named(c) => write!(f, "{} (#{:x})", <&'static str>::from(c), self),
+            ColorSpec::Rgb(_) => write!(f, "#{:x}", self),
+        }
     }
 }
 

@@ -3,6 +3,9 @@
 -- Wire it up in wezterm.lua:
 --   require('termboss').apply_to_config(config)
 --
+-- WezTerm only auto-reloads its config in windows that already had a config file when they
+-- started. In a window opened before wezterm.lua existed, press Ctrl+Shift+R or reopen it.
+--
 -- term-boss sets two per-pane user vars (OSC 1337 SetUserVar):
 --   TAB_COLOR  '#rrggbb' tab background, '' to clear
 --   TAB_BADGE  text shown in the right status area, '' to clear
@@ -42,9 +45,14 @@ function M.format_tab_title(tab, tabs, panes, config, hover, max_width)
   return result
 end
 
--- pane here is a Pane object: user vars come from a method.
+-- pane here is a Pane object: user vars come from a method. The pane may already be gone when
+-- the event fires (a tab was just closed), in which case get_user_vars raises; just skip.
 function M.update_status(window, pane)
-  local badge = nonempty(pane:get_user_vars().TAB_BADGE)
+  local ok, vars = pcall(pane.get_user_vars, pane)
+  if not ok or not vars then
+    return
+  end
+  local badge = nonempty(vars.TAB_BADGE)
   if badge then
     window:set_right_status(wezterm.format {
       { Attribute = { Intensity = 'Bold' } },

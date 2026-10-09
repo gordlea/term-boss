@@ -204,8 +204,9 @@ pub fn validate_name(name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Load the first `<dir>/<name>.toml` found in `scheme_dirs()`. `Ok(None)` if there is none.
-pub fn load_from_dir(name: &str) -> Result<Option<ColorScheme>> {
+/// Load the first `<dir>/<name>.toml` found in `scheme_dirs()`, returning it with its path.
+/// `Ok(None)` if there is none.
+pub fn load_from_dir(name: &str) -> Result<Option<(ColorScheme, PathBuf)>> {
     validate_name(name)?;
     for dir in scheme_dirs()? {
         let path = dir.join(format!("{name}.toml"));
@@ -216,7 +217,7 @@ pub fn load_from_dir(name: &str) -> Result<Option<ColorScheme>> {
         };
         let scheme = toml::from_str(&contents)
             .with_context(|| format!("Unable to read file {:?} as a valid color scheme", path))?;
-        return Ok(Some(scheme));
+        return Ok(Some((scheme, path)));
     }
     Ok(None)
 }

@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, env, fs};
+use std::{collections::BTreeMap, env, fs, path::PathBuf};
 
 use anyhow::{Context, Result, bail};
 use clap::Args;
@@ -112,7 +112,8 @@ fn merge_field<T>(mine: &mut Option<T>, theirs: Option<T>, replace: bool) {
 
 impl SetConfig {
     /// Fill in fields from `other`. With `replace_existing_values == false`, values already
-    /// present win; the palette is merged slot by slot. `color_schemes` is never merged.
+    /// present win; the palette is merged slot by slot; `reset` is OR-ed. `color_schemes` is
+    /// never merged.
     pub fn merge(&mut self, other: SetConfig, replace_existing_values: bool) {
         merge_field(&mut self.tabname, other.tabname, replace_existing_values);
         merge_field(&mut self.badgetext, other.badgetext, replace_existing_values);
@@ -121,6 +122,9 @@ impl SetConfig {
         merge_field(&mut self.fgcolor, other.fgcolor, replace_existing_values);
         merge_field(&mut self.bgcolor, other.bgcolor, replace_existing_values);
         merge_field(&mut self.cursorcolor, other.cursorcolor, replace_existing_values);
+        // A bool cannot be "unset" by a nearer level, so any level asking for a reset gets one.
+        // This is what makes a `reset = true` in $HOME/.term-boss.toml apply to every project.
+        self.reset |= other.reset;
         if let Some(theirs) = other.color_mapping {
             let mine = self.color_mapping.get_or_insert_default();
             for (slot, color) in theirs {
@@ -132,16 +136,71 @@ impl SetConfig {
     }
 }
 
+/// Where one level of configuration came from.
+#[derive(Debug, Clone)]
+pub enum Source {
+    /// CLI flags and environment variables.
+    Cli,
+    /// A `.term-boss.toml` at this path.
+    File(PathBuf),
+}
+
+/// One level of configuration: the CLI, or one config file. Nearest levels come first.
+#[derive(Debug, Clone)]
+pub struct Level {
+    pub source: Source,
+    pub config: SetConfig,
+}
+
+/// Where the selected scheme's definition was found.
+#[derive(Debug, Clone)]
+pub enum SchemeOrigin {
+    /// Defined under `color_schemes` in this config file.
+    Inline(PathBuf),
+    /// Loaded from this scheme file (own `color_schemes/` dir or the library).
+    Dir(PathBuf),
+}
+
+/// The outcome of merging all levels.
+#[derive(Debug)]
+pub struct Resolution {
+    pub config: SetConfig,
+    /// The scheme that was applied, if any, and where it came from.
+    pub scheme: Option<(String, SchemeOrigin)>,
+}
+
+/// Collect the CLI/env config and every `.term-boss.toml` from the current directory up to `/`,
+/// nearest first. A file that does not parse is an error naming the file.
+pub fn load_levels(cli_set_config: &SetConfig) -> Result<Vec<Level>> {
+    let mut current_dir = env::current_dir().context("Unable to determine current dir!")?;
+
+    let mut levels = vec![Level { source: Source::Cli, config: cli_set_config.clone() }];
+
+    loop {
+        let candidate = current_dir.join(CONFIG_FILE_NAME);
+        if let Ok(contents) = fs::read_to_string(&candidate) {
+            let config = toml::from_str(&contents)
+                .with_context(|| format!("Unable to read file {:?} as a valid config file", candidate))?;
+            levels.push(Level { source: Source::File(candidate), config });
+        }
+        if !current_dir.pop() {
+            break;
+        }
+    }
+
+    Ok(levels)
+}
+
 /// Find the scheme called `name`: inline definitions (nearest first) shadow files in the
-/// scheme directory.
-fn find_scheme(name: &str, inline: &[(String, ColorScheme)]) -> Result<ColorScheme> {
-    if let Some((_, scheme)) = inline.iter().find(|(n, _)| n == name) {
-        return Ok(scheme.clone());
+/// scheme directories.
+fn find_scheme(name: &str, inline: &[(String, ColorScheme, PathBuf)]) -> Result<(ColorScheme, SchemeOrigin)> {
+    if let Some((_, scheme, path)) = inline.iter().find(|(n, _, _)| n == name) {
+        return Ok((scheme.clone(), SchemeOrigin::Inline(path.clone())));
     }
-    if let Some(scheme) = scheme::load_from_dir(name)? {
-        return Ok(scheme);
+    if let Some((scheme, path)) = scheme::load_from_dir(name)? {
+        return Ok((scheme, SchemeOrigin::Dir(path)));
     }
-    let mut known: Vec<String> = inline.iter().map(|(n, _)| n.clone()).collect();
+    let mut known: Vec<String> = inline.iter().map(|(n, _, _)| n.clone()).collect();
     known.extend(scheme::list_dir_names());
     known.sort();
     known.dedup();
@@ -168,43 +227,38 @@ fn find_scheme(name: &str, inline: &[(String, ColorScheme)]) -> Result<ColorSche
     bail!("Unknown color scheme {:?}; known schemes: {}{}", name, listed, hint);
 }
 
-/// Merge the CLI/env config with every `.term-boss.toml` from the current directory up to `/`.
-///
-/// Resolution is per level, nearest first (CLI, then cwd, then each parent): a nearer level
-/// overrides a farther one field by field. Only the nearest level that selects a `scheme` has
-/// it applied, beneath that level's own fields; farther levels' selections are ignored so two
-/// schemes never blend. Inline schemes may be defined at any level and shadow files in the
-/// scheme directory.
-pub fn read_hierarchial_config(cli_set_config: &SetConfig) -> Result<SetConfig> {
-    let mut current_dir = env::current_dir().context("Unable to determine current dir!")?;
-
-    let mut levels: Vec<SetConfig> = vec![cli_set_config.clone()];
-
-    loop {
-        let candidate = current_dir.join(CONFIG_FILE_NAME);
-        if let Ok(contents) = fs::read_to_string(&candidate) {
-            let read_config = toml::from_str(&contents)
-                .with_context(|| format!("Unable to read file {:?} as a valid config file", candidate))?;
-            levels.push(read_config);
-        }
-        if !current_dir.pop() {
-            break;
-        }
-    }
-
+/// Merge levels nearest first: a nearer level overrides a farther one field by field. Only the
+/// nearest level that selects a `scheme` has it applied, beneath that level's own fields;
+/// farther levels' selections are ignored so two schemes never blend. Inline schemes may be
+/// defined at any level and shadow files in the scheme directories.
+pub fn merge_levels(mut levels: Vec<Level>) -> Result<Resolution> {
     // Nearest definitions first, so `find` picks the closest scheme with a given name.
-    let inline: Vec<(String, ColorScheme)> = levels
+    let inline: Vec<(String, ColorScheme, PathBuf)> = levels
         .iter_mut()
-        .flat_map(|level| level.color_schemes.take().unwrap_or_default())
+        .flat_map(|level| {
+            let path = match &level.source {
+                Source::File(path) => path.clone(),
+                Source::Cli => PathBuf::from("<cli>"),
+            };
+            level
+                .config
+                .color_schemes
+                .take()
+                .unwrap_or_default()
+                .into_iter()
+                .map(move |(name, scheme)| (name, scheme, path.clone()))
+        })
         .collect();
 
     let mut merged: Option<SetConfig> = None;
-    let mut scheme_applied = false;
-    for mut level in levels {
-        if let (Some(name), false) = (&level.scheme, scheme_applied) {
-            let scheme = find_scheme(name, &inline)?;
+    let mut selected: Option<(String, SchemeOrigin)> = None;
+    for Level { config: mut level, .. } in levels {
+        if selected.is_none()
+            && let Some(name) = level.scheme.clone()
+        {
+            let (scheme, origin) = find_scheme(&name, &inline)?;
             level.merge(scheme.into_set_config(), false);
-            scheme_applied = true;
+            selected = Some((name, origin));
         }
         match merged.as_mut() {
             Some(m) => m.merge(level, false),
@@ -212,5 +266,11 @@ pub fn read_hierarchial_config(cli_set_config: &SetConfig) -> Result<SetConfig> 
         }
     }
 
-    Ok(merged.unwrap_or_default())
+    Ok(Resolution { config: merged.unwrap_or_default(), scheme: selected })
+}
+
+/// Merge the CLI/env config with every `.term-boss.toml` from the current directory up to `/`.
+/// See `load_levels` and `merge_levels`.
+pub fn read_hierarchial_config(cli_set_config: &SetConfig) -> Result<SetConfig> {
+    Ok(merge_levels(load_levels(cli_set_config)?)?.config)
 }

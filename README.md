@@ -43,6 +43,11 @@ require('termboss').apply_to_config(config)
 The module registers `format-tab-title` and `update-status` handlers. WezTerm only runs the
 first handler registered for an event, so remove any existing `format-tab-title` handler.
 
+WezTerm reloads its configuration automatically only in windows that already had a config file
+when they started. If `~/.config/wezterm/wezterm.lua` did not exist before you ran the setup,
+press `Ctrl+Shift+R` in each open window or restart WezTerm. `term-boss show` reports whether
+the module is installed and required.
+
 ### Colour scheme library
 
 Optionally fetch the roughly 1000 colour schemes built into
@@ -84,6 +89,41 @@ term-boss set [OPTIONS]
 
 Colours accept a CSS colour name (`tomato`), `#rgb`, `#rrggbb`, or `rgb(r, g, b)`.
 
+`term-boss show` takes the same flags and explains what `set` would do from the current
+directory without touching the terminal: the detected terminal, every config file found, the
+keys each one sets, which scheme was selected and where it came from, and the final values.
+Reach for it whenever a `cd` does not seem to change anything.
+
+```
+$ term-boss show
+Terminal: Wezterm
+  TERM_PROGRAM=WezTerm
+  ...
+
+Config files (nearest first):
+  /home/me/dev/api/backend/.term-boss.toml
+  /home/me/dev/api/.term-boss.toml
+
+CLI / env:
+  (no keys)
+
+/home/me/dev/api/backend/.term-boss.toml:
+  tabname = "backend"
+
+/home/me/dev/api/.term-boss.toml:
+  scheme = "repo"
+  tabcolor = #2b6cb0
+  reset = true
+  color_schemes: repo
+
+Scheme: repo (inline, defined in /home/me/dev/api/.term-boss.toml)
+
+Resolved:
+  tabname = "backend"
+  ...
+  palette = 16 slots
+```
+
 On iTerm2 the badge text supports iTerm's variables when single-quoted, for example
 `--badgetext '\(hostname)'`. See <https://iterm2.com/documentation-variables.html>.
 
@@ -91,6 +131,8 @@ On iTerm2 the badge text supports iTerm's variables when single-quoted, for exam
 
 `term-boss set` looks for `.term-boss.toml` in the current directory and every parent up
 to `/`. Every key accepts the same values as the matching CLI flag.
+Runnable examples of every use case live in [`examples/`](examples). `term-boss show` prints
+which file each value came from.
 
 ```toml
 tabname = "api"
