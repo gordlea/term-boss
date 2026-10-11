@@ -8,15 +8,15 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug executable 'iterm-tab'",
+            "name": "Debug executable 'term-boss'",
             "cargo": {
                 "args": [
                     "build",
-                    "--bin=iterm-tab",
-                    "--package=iterm-tab",
+                    "--bin=term-boss",
+                    "--package=term-boss",
                 ],
                 "filter": {
-                    "name": "iterm-tab",
+                    "name": "term-boss",
                     "kind": "bin"
                 }
             },
@@ -31,16 +31,16 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug unit tests in executable 'iterm-tab'",
+            "name": "Debug unit tests in executable 'term-boss'",
             "cargo": {
                 "args": [
                     "test",
                     "--no-run",
-                    "--bin=iterm-tab",
-                    "--package=iterm-tab"
+                    "--bin=term-boss",
+                    "--package=term-boss"
                 ],
                 "filter": {
-                    "name": "iterm-tab",
+                    "name": "term-boss",
                     "kind": "bin"
                 }
             },

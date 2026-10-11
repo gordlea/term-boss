@@ -1,0 +1,33 @@
+# Root of a monorepo. Subdirectories override individual keys; everything else is inherited.
+tabcolor = "#2b6cb0"
+reset = true
+
+# An inline scheme shared by every subdirectory below.
+scheme = "repo"
+
+[color_schemes.repo.colors.primary]
+background = "#1a202c"
+foreground = "#e2e8f0"
+
+[color_schemes.repo.colors.cursor]
+cursor = "#f6ad55"
+
+[color_schemes.repo.colors.normal]
+black = "#1a202c"
+red = "#fc8181"
+green = "#68d391"
+yellow = "#f6e05e"
+blue = "#63b3ed"
+magenta = "#d6bcfa"
+cyan = "#76e4f6"
+white = "#e2e8f0"
+
+[color_schemes.repo.colors.bright]
+black = "#4a5568"
+red = "#feb2b2"
+green = "#9ae6b4"
+yellow = "#faf089"
+blue = "#90cdf4"
+magenta = "#e9d8fd"
+cyan = "#9decf9"
+white = "#f7fafc"

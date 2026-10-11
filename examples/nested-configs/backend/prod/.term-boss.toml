@@ -1,0 +1,3 @@
+# Make production shells unmistakable. `tabname` is still inherited from ../ ("backend").
+tabcolor = "crimson"
+badgetext = "⚠ PROD"

@@ -1,0 +1,36 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --locked
+      - name: Clippy
+        run: cargo clippy --locked -- -D warnings
+      - name: Smoke test the examples
+        run: |
+          set -euo pipefail
+          bin="$PWD/target/debug/term-boss"
+          # examples/custom-scheme-file selects a scheme from the user's own scheme directory.
+          export XDG_CONFIG_HOME="$RUNNER_TEMP/xdg"
+          mkdir -p "$XDG_CONFIG_HOME/term-boss/color_schemes"
+          cp examples/custom-scheme-file/nord.toml "$XDG_CONFIG_HOME/term-boss/color_schemes/"
+          for dir in $(find examples -name .term-boss.toml -printf '%h\n' | sort); do
+            case "$dir" in examples/library-scheme) continue ;; esac   # needs the downloaded library
+            (cd "$dir" && TERM_PROGRAM=iTerm.app "$bin" set > /dev/null)
+          done
+          TERM_PROGRAM=iTerm.app "$bin" show > /dev/null

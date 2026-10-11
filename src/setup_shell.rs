@@ -30,18 +30,20 @@ impl ValueEnum for SetupShell {
     }
 }
 
-const SETUP_ZSH: &'static str =
-"_iterm_tab_autoload_hook () {\n\
-    iterm-tab set\n\
+/// `autoload` is idempotent, so this works whether or not .zshrc already loaded `add-zsh-hook`.
+const SETUP_ZSH: &str =
+"autoload -Uz add-zsh-hook\n\
+_term_boss_chpwd_hook () {\n\
+    term-boss set\n\
 }\n\
-add-zsh-hook chpwd _iterm_tab_autoload_hook\n\
+add-zsh-hook chpwd _term_boss_chpwd_hook\n\
 ";
 
 impl SetupShell {
     pub fn output(&self, stdout: &mut std::io::Stdout) {
         match self {
             SetupShell::Zsh => {
-                stdout.write(SETUP_ZSH.as_bytes()).unwrap();
+                let _ = stdout.write_all(SETUP_ZSH.as_bytes());
             }
         }
     }

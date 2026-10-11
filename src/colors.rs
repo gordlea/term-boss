@@ -1,16 +1,108 @@
-use std::fmt::{self, Formatter, LowerHex};
+use std::{
+    fmt::{self, Display, Formatter, LowerHex},
+    str::FromStr,
+};
 
-use clap::ValueEnum;
 use serde::Deserialize;
 use strum::{IntoStaticStr, VariantArray};
 
-
 pub type ColorValue = [u8; 3];
 
-#[derive(Debug, Clone, IntoStaticStr, VariantArray, Deserialize)]
+/// A colour given as a CSS name, `#rgb`/`#rrggbb` hex, Alacritty-style `0xrrggbb`, or
+/// `rgb(r, g, b)`. Parsed from the CLI via `FromStr` and from TOML via `TryFrom<String>`.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(try_from = "String")]
+pub enum ColorSpec {
+    Named(Color),
+    Rgb(ColorValue),
+}
+
+impl ColorSpec {
+    pub const fn get_rgb(&self) -> ColorValue {
+        match self {
+            ColorSpec::Named(c) => c.get_rgb(),
+            ColorSpec::Rgb(v) => *v,
+        }
+    }
+}
+
+const COLOR_ERR: &str = "expected a CSS colour name, #rgb, #rrggbb, 0xrrggbb or rgb(r, g, b)";
+
+fn hex_byte(s: &str) -> Option<u8> {
+    // `from_str_radix` would also accept a leading `+`.
+    s.bytes().all(|b| b.is_ascii_hexdigit()).then(|| u8::from_str_radix(s, 16).ok())?
+}
+
+/// `rgb` or `rrggbb` hex digits (no prefix).
+fn parse_hex(hex: &str) -> Option<ColorValue> {
+    if !hex.is_ascii() {
+        return None;
+    }
+    let parts = match hex.len() {
+        3 => [0, 1, 2].map(|i| hex_byte(&hex[i..i + 1]).map(|n| n * 17)),
+        6 => [0, 2, 4].map(|i| hex_byte(&hex[i..i + 2])),
+        _ => return None,
+    };
+    match parts {
+        [Some(r), Some(g), Some(b)] => Some([r, g, b]),
+        _ => None,
+    }
+}
+
+impl FromStr for ColorSpec {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.trim();
+        if let Some(hex) = s.strip_prefix('#').or_else(|| s.strip_prefix("0x")).or_else(|| s.strip_prefix("0X")) {
+            return parse_hex(hex).map(ColorSpec::Rgb).ok_or(COLOR_ERR);
+        }
+        if s.get(..4).is_some_and(|p| p.eq_ignore_ascii_case("rgb(")) && s.ends_with(')') {
+            let mut parts = s[4..s.len() - 1].split(',').map(|p| p.trim().parse::<u8>().ok());
+            return match (parts.next(), parts.next(), parts.next(), parts.next()) {
+                (Some(Some(r)), Some(Some(g)), Some(Some(b)), None) => Ok(ColorSpec::Rgb([r, g, b])),
+                _ => Err(COLOR_ERR),
+            };
+        }
+        Color::VARIANTS
+            .iter()
+            .find(|c| <&'static str>::from(*c).eq_ignore_ascii_case(s))
+            .map(|c| ColorSpec::Named(*c))
+            .ok_or(COLOR_ERR)
+    }
+}
+
+impl TryFrom<String> for ColorSpec {
+    type Error = &'static str;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        s.parse()
+    }
+}
+
+/// Human-readable form for diagnostics: `#rrggbb`, or `name (#rrggbb)` for named colours.
+impl Display for ColorSpec {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match self {
+            ColorSpec::Named(c) => write!(f, "{} (#{:x})", <&'static str>::from(c), self),
+            ColorSpec::Rgb(_) => write!(f, "#{:x}", self),
+        }
+    }
+}
+
+impl LowerHex for ColorSpec {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        for byte in self.get_rgb() {
+            write!(f, "{:02x}", byte)?;
+        }
+        Ok(())
+    }
+}
+
+/// CSS named colours. Only the name table lives here; use `ColorSpec` everywhere else.
+#[derive(Debug, Clone, Copy, IntoStaticStr, VariantArray)]
 #[repr(u8)]
-#[strum(ascii_case_insensitive, serialize_all = "lowercase")]
-#[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
 pub enum Color {
     Antiquewhite,
     Aliceblue,
@@ -317,25 +409,3 @@ impl Color {
     }
 }
 
-
-impl ValueEnum for Color {
-    fn value_variants<'a>() -> &'a [Self] {
-        Color::VARIANTS
-    }
-
-    fn to_possible_value(&self) -> Option<clap::builder::PossibleValue> {
-        let x: &'static str = self.into();
-
-        Some(clap::builder::PossibleValue::new(x))
-    }
-}
-
-impl LowerHex for Color {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        let bytes = self.get_rgb();
-        for byte in bytes {
-            write!(f, "{:02x}", byte)?;
-        }
-        Ok(())
-    }
-}

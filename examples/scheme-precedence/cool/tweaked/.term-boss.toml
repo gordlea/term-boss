@@ -1,0 +1,3 @@
+# An explicit key overrides the inherited scheme's value for that key only. The rest of
+# "cool" (foreground, blue, cyan) still applies.
+bgcolor = "#000000"

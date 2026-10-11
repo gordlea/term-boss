@@ -1,0 +1,11 @@
+# Select one of WezTerm's ~1000 built-in colour schemes by name.
+#
+# Requires the library to be installed once:
+#     term-boss setup colorschemes
+# Without it, `term-boss set` reports an unknown scheme and tells you to run that command.
+#
+# Names are exactly WezTerm's `color_scheme` names, so the same string works in wezterm.lua.
+# Browse them at https://wezterm.org/colorschemes/ or list the files in
+# ~/.config/term-boss/wezterm_schemes/.
+scheme = "Catppuccin Mocha"
+tabcolor = "#cba6f7"

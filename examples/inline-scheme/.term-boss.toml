@@ -1,0 +1,34 @@
+# A colour scheme defined and selected in the same file.
+scheme = "ocean"
+
+# Schemes use Alacritty's theme format under `[color_schemes.<name>.colors.*]`.
+# To paste in a theme file from https://github.com/alacritty/alacritty-theme, prefix each
+# of its `[colors.xxx]` headers with `color_schemes.<name>.`.
+# term-boss applies primary, cursor, normal and bright; other Alacritty sections are ignored.
+
+[color_schemes.ocean.colors.primary]
+background = "#0b1a2a"
+foreground = "#c8d6e5"
+
+[color_schemes.ocean.colors.cursor]
+cursor = "#ffd166"
+
+[color_schemes.ocean.colors.normal]
+black = "#0b1a2a"
+red = "#ef476f"
+green = "#06d6a0"
+yellow = "#ffd166"
+blue = "#118ab2"
+magenta = "#b388eb"
+cyan = "#4cc9f0"
+white = "#c8d6e5"
+
+[color_schemes.ocean.colors.bright]
+black = "#3a506b"
+red = "#ff7a98"
+green = "#5bf0c7"
+yellow = "#ffe08a"
+blue = "#3fb6dd"
+magenta = "#cdb0ff"
+cyan = "#8fe3ff"
+white = "#f1f5f9"

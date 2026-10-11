@@ -1,0 +1,22 @@
+# Two schemes defined here; this level selects "warm". See README.md for what each
+# subdirectory produces.
+scheme = "warm"
+
+[color_schemes.warm.colors.primary]
+background = "#2a1b12"
+foreground = "#f3e9dc"
+
+[color_schemes.warm.colors.cursor]
+cursor = "#ff9f1c"
+
+[color_schemes.warm.colors.normal]
+red = "#e63946"
+yellow = "#ffb703"
+
+[color_schemes.cool.colors.primary]
+background = "#0d1b2a"
+foreground = "#e0e1dd"
+
+[color_schemes.cool.colors.normal]
+blue = "#415a77"
+cyan = "#778da9"
