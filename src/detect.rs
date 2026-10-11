@@ -4,11 +4,12 @@ use crate::terminal_app::TerminalApp;
 
 /// Environment variables shown by `term-boss show`: the ones `detect_terminal` consults, plus the
 /// Konsole D-Bus coordinates its badge and tab-colour reset need.
-pub const DETECTION_VARS: [&str; 8] = [
+pub const DETECTION_VARS: [&str; 9] = [
     "TERM_PROGRAM",
     "TERM",
     "KONSOLE_VERSION",
     "ALACRITTY_WINDOW_ID",
+    "ALACRITTY_SOCKET",
     "WEZTERM_PANE",
     "ITERM_SESSION_ID",
     "KONSOLE_DBUS_SERVICE",
