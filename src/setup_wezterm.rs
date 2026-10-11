@@ -25,7 +25,10 @@ fn wezterm_config_dir() -> Result<PathBuf> {
 
 /// Does this wezterm.lua source pull in the module?
 fn config_requires_module(contents: &str) -> bool {
-    contents.contains("require('termboss')") || contents.contains("require 'termboss'") || contents.contains("require(\"termboss\")")
+    contents.contains("require('termboss')")
+        || contents.contains("require 'termboss'")
+        || contents.contains("require(\"termboss\")")
+        || contents.contains("require \"termboss\"")
 }
 
 /// Whether the Lua module is on disk and referenced from wezterm.lua. Read-only.

@@ -32,7 +32,11 @@ pub fn run(cli: &SetConfig, stdout: &mut Stdout) -> Result<()> {
         if terminal_app::konsole_dbus_available() {
             writeln!(stdout, "  D-Bus (badge, tab-colour reset): available")?;
         } else {
-            writeln!(stdout, "  D-Bus (badge, tab-colour reset): unavailable (KONSOLE_DBUS_SERVICE / KONSOLE_DBUS_SESSION not set)")?;
+            writeln!(
+                stdout,
+                "  D-Bus (badge, tab-colour reset): unavailable (KONSOLE_DBUS_SERVICE / KONSOLE_DBUS_SESSION not \
+                 set, dbus-send/busctl missing, or the call failed)"
+            )?;
         }
     }
     if terminal == TerminalApp::Wezterm {

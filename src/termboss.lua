@@ -41,6 +41,9 @@ function M.format_tab_title(tab, tabs, panes, config, hover, max_width)
     table.insert(result, { Background = { Color = color } })
     table.insert(result, { Foreground = { Color = fg_for(color) } })
   end
+  -- Reserve the two padding cells so the title never exceeds the space wezterm allocated.
+  local available = math.max(max_width - 2, 0)
+  title = wezterm.truncate_right(title, available)
   table.insert(result, { Text = ' ' .. title .. ' ' })
   return result
 end

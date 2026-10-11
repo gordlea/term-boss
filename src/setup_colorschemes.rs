@@ -118,11 +118,11 @@ pub fn install(stdout: &mut Stdout, yes: bool) -> Result<()> {
         }
         let (toml, skipped) = convert(entry, None);
         skipped_colors += skipped;
-        match write_scheme(&tmp, name, &toml) {
-            Ok(()) => {
-                written.insert(name.to_lowercase());
-            }
-            Err(_) => skipped_names.push(name.clone()),
+        if scheme::validate_name(name).is_err() {
+            skipped_names.push(name.clone());
+        } else {
+            write_scheme(&tmp, name, &toml)?;
+            written.insert(name.to_lowercase());
         }
         for alias in entry.metadata.aliases.iter().flatten() {
             let key = alias.to_lowercase();
@@ -130,12 +130,12 @@ pub fn install(stdout: &mut Stdout, yes: bool) -> Result<()> {
                 continue;
             }
             let (toml, _) = convert(entry, Some(alias));
-            match write_scheme(&tmp, alias, &toml) {
-                Ok(()) => {
-                    written.insert(key);
-                    aliases += 1;
-                }
-                Err(_) => skipped_names.push(alias.clone()),
+            if scheme::validate_name(alias).is_err() {
+                skipped_names.push(alias.clone());
+            } else {
+                write_scheme(&tmp, alias, &toml)?;
+                written.insert(key);
+                aliases += 1;
             }
         }
     }
@@ -188,7 +188,6 @@ fn download(dest: &Path) -> Result<()> {
 }
 
 fn write_scheme(dir: &Path, name: &str, toml: &str) -> Result<()> {
-    scheme::validate_name(name)?;
     let path = dir.join(format!("{name}.toml"));
     fs::write(&path, toml).with_context(|| format!("unable to write {}", path.display()))
 }

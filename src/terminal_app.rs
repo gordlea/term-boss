@@ -57,15 +57,19 @@ enum DbusArg<'a> {
     Bool(bool),
 }
 
+/// Whether Konsole's D-Bus interface actually works, not just whether the env coordinates are
+/// set: makes a harmless, read-only call (`sessionId`) and reports its success. A missing
+/// `dbus-send`/`busctl`, or Konsole rejecting the call, counts as unavailable.
 pub fn konsole_dbus_available() -> bool {
-    env::var_os("KONSOLE_DBUS_SERVICE").is_some() && env::var_os("KONSOLE_DBUS_SESSION").is_some()
+    konsole_dbus("sessionId", &[])
 }
 
 /// Call `method` on the Konsole session that owns this shell. Uses `dbus-send` (ships with D-Bus)
-/// and falls back to `busctl` (systemd) if that is missing. Silent no-op without the env vars.
-fn konsole_dbus(method: &str, args: &[DbusArg]) {
+/// and falls back to `busctl` (systemd) if that is missing. Returns whether the call succeeded;
+/// `false` without the env vars, without a working D-Bus client, or if the call itself fails.
+fn konsole_dbus(method: &str, args: &[DbusArg]) -> bool {
     let (Ok(service), Ok(path)) = (env::var("KONSOLE_DBUS_SERVICE"), env::var("KONSOLE_DBUS_SESSION")) else {
-        return;
+        return false;
     };
 
     let mut cmd = Command::new("dbus-send");
@@ -77,8 +81,9 @@ fn konsole_dbus(method: &str, args: &[DbusArg]) {
         });
     }
     match quiet(cmd).status() {
+        Ok(status) => return status.success(),
         Err(e) if e.kind() == ErrorKind::NotFound => { /* try busctl */ }
-        _ => return,
+        Err(_) => return false,
     }
 
     let signature: String = args
@@ -96,7 +101,7 @@ fn konsole_dbus(method: &str, args: &[DbusArg]) {
             DbusArg::Bool(b) => b.to_string(),
         });
     }
-    let _ = quiet(cmd).status();
+    quiet(cmd).status().map(|s| s.success()).unwrap_or(false)
 }
 
 /// The emit methods below write for every variant, including `Unknown`: deciding whether to
