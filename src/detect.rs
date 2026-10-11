@@ -32,19 +32,19 @@ pub fn detect_terminal() -> TerminalApp {
         TerminalApp::Unknown
     };
 
-    if term_app == TerminalApp::Unknown
-        && env::var("TERM").is_ok_and(|term| term.contains("alacritty"))
-    {
-        term_app = TerminalApp::Alacritty;
-    }
-
     if term_app == TerminalApp::Unknown {
-        if env::var("KONSOLE_VERSION").is_ok() {
-            term_app = TerminalApp::Konsole;
-        } else if env::var_os("ALACRITTY_WINDOW_ID").is_some() || env::var_os("ALACRITTY_SOCKET").is_some() {
-            // Alacritty exports these to every child regardless of the configured TERM,
-            // which is often "xterm-256color" rather than "alacritty".
+        // Alacritty is checked before KONSOLE_VERSION: Konsole's variable is inherited by every
+        // child process, so an Alacritty started from a Konsole shell has both, and only the
+        // Alacritty ones describe the terminal actually rendering this shell. ALACRITTY_WINDOW_ID
+        // / ALACRITTY_SOCKET are exported regardless of the configured TERM, which is often
+        // "xterm-256color" rather than "alacritty".
+        if env::var("TERM").is_ok_and(|term| term.contains("alacritty"))
+            || env::var_os("ALACRITTY_WINDOW_ID").is_some()
+            || env::var_os("ALACRITTY_SOCKET").is_some()
+        {
             term_app = TerminalApp::Alacritty;
+        } else if env::var("KONSOLE_VERSION").is_ok() {
+            term_app = TerminalApp::Konsole;
         } else if env::var("WEZTERM_PANE").is_ok() {
             term_app = TerminalApp::Wezterm;
         } else if env::var("ITERM_SESSION_ID").is_ok() {

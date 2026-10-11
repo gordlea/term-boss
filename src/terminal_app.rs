@@ -99,6 +99,8 @@ fn konsole_dbus(method: &str, args: &[DbusArg]) {
     let _ = quiet(cmd).status();
 }
 
+/// The emit methods below write for every variant, including `Unknown`: deciding whether to
+/// emit at all is the caller's job (`term-boss set` exits early for `Unknown`).
 #[derive(Debug, PartialEq, Eq, Default)]
 pub enum TerminalApp {
     #[default]
@@ -136,6 +138,22 @@ impl TerminalApp {
         }
     }
 
+    /// A terminal with tabs but no badge shows the badge in the tab title instead.
+    pub fn badge_in_title(&self, badgetext: Option<&str>) -> bool {
+        badgetext.is_some() && self.supports_tab_name() && !self.supports_badge()
+    }
+
+    /// The tab title `set` sends: the configured name, with the badge folded in as
+    /// `name [badge]` (or just `[badge]`) when `badge_in_title`.
+    pub fn effective_title(&self, tabname: Option<&str>, badgetext: Option<&str>) -> Option<String> {
+        let badge = if self.badge_in_title(badgetext) { badgetext } else { None };
+        match (tabname, badge) {
+            (Some(name), Some(badge)) => Some(format!("{name} [{badge}]")),
+            (None, Some(badge)) => Some(format!("[{badge}]")),
+            (name, None) => name.map(str::to_owned),
+        }
+    }
+
     pub fn reset_tab_color(&self, stdout: &mut Stdout) {
         match self {
             TerminalApp::Iterm2 => {
@@ -165,7 +183,7 @@ impl TerminalApp {
             }
             TerminalApp::Wezterm => {
                 // An empty tab title makes wezterm fall back to the active pane's title.
-                wezterm_cli(&["set-tab-title", ""]);
+                wezterm_cli(&["set-tab-title", "--", ""]);
             }
             TerminalApp::Unknown => { /* no op */ }
         }
@@ -226,7 +244,8 @@ impl TerminalApp {
                 let _ = write!(stdout, "\x1B]30;{}\x07", tabname);
             }
             TerminalApp::Wezterm => {
-                wezterm_cli(&["set-tab-title", tabname]);
+                // `--` so a title starting with '-' is not parsed as a flag.
+                wezterm_cli(&["set-tab-title", "--", tabname]);
             }
             TerminalApp::Unknown => { /* no op */ }
         }
@@ -234,33 +253,21 @@ impl TerminalApp {
 
     /// Set a pane colour (foreground/background/cursor). Same escape sequence on every terminal.
     pub fn set_pane_color(&self, stdout: &mut Stdout, which: PaneColor, color: &ColorSpec) {
-        if *self == TerminalApp::Unknown {
-            return;
-        }
         let _ = write!(stdout, "\x1B]{};#{:x}\x07", which as u8, color);
     }
 
     /// Reset a pane colour to the terminal's scheme default (OSC 110/111/112).
     pub fn reset_pane_color(&self, stdout: &mut Stdout, which: PaneColor) {
-        if *self == TerminalApp::Unknown {
-            return;
-        }
         let _ = write!(stdout, "\x1B]{}\x07", which as u8 + 100);
     }
 
     /// Set one ANSI palette slot (OSC 4). Same escape sequence on every terminal.
     pub fn set_palette_color(&self, stdout: &mut Stdout, slot: TermColorMapping, color: &ColorSpec) {
-        if *self == TerminalApp::Unknown {
-            return;
-        }
         let _ = write!(stdout, "\x1B]4;{};#{:x}\x07", slot as u8, color);
     }
 
     /// Reset the given palette slots to the terminal's defaults in one OSC 104 sequence.
     pub fn reset_palette_colors(&self, stdout: &mut Stdout, slots: impl Iterator<Item = TermColorMapping>) {
-        if *self == TerminalApp::Unknown {
-            return;
-        }
         let mut seq = String::from("\x1B]104");
         for slot in slots {
             seq.push(';');

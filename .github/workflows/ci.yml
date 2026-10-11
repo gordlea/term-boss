@@ -25,6 +25,10 @@ jobs:
         run: |
           set -euo pipefail
           bin="$PWD/target/debug/term-boss"
+          # examples/custom-scheme-file selects a scheme from the user's own scheme directory.
+          export XDG_CONFIG_HOME="$RUNNER_TEMP/xdg"
+          mkdir -p "$XDG_CONFIG_HOME/term-boss/color_schemes"
+          cp examples/custom-scheme-file/nord.toml "$XDG_CONFIG_HOME/term-boss/color_schemes/"
           for dir in $(find examples -name .term-boss.toml -printf '%h\n' | sort); do
             case "$dir" in examples/library-scheme) continue ;; esac   # needs the downloaded library
             (cd "$dir" && TERM_PROGRAM=iTerm.app "$bin" set > /dev/null)

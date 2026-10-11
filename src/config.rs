@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, env, fs, path::PathBuf};
+use std::{collections::BTreeMap, env, fs, io::ErrorKind, path::PathBuf};
 
 use anyhow::{Context, Result, bail};
 use clap::Args;
@@ -178,10 +178,14 @@ pub fn load_levels(cli_set_config: &SetConfig) -> Result<Vec<Level>> {
 
     loop {
         let candidate = current_dir.join(CONFIG_FILE_NAME);
-        if let Ok(contents) = fs::read_to_string(&candidate) {
-            let config = toml::from_str(&contents)
-                .with_context(|| format!("Unable to read file {:?} as a valid config file", candidate))?;
-            levels.push(Level { source: Source::File(candidate), config });
+        match fs::read_to_string(&candidate) {
+            Ok(contents) => {
+                let config = toml::from_str(&contents)
+                    .with_context(|| format!("Unable to read file {:?} as a valid config file", candidate))?;
+                levels.push(Level { source: Source::File(candidate), config });
+            }
+            Err(e) if e.kind() == ErrorKind::NotFound => {}
+            Err(e) => eprintln!("Unable to read file {:?}, skipping: {e}", candidate),
         }
         if !current_dir.pop() {
             break;

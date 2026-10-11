@@ -101,30 +101,38 @@ pub fn install(stdout: &mut Stdout, yes: bool) -> Result<()> {
     }
     fs::create_dir_all(&tmp).with_context(|| format!("unable to create {}", tmp.display()))?;
 
-    let real_names: HashSet<&str> = entries.iter().map(|e| e.metadata.name.as_str()).collect();
+    // Names are compared case-insensitively: the default macOS file system is, so `Foo.toml`
+    // and `foo.toml` would silently overwrite each other there.
+    let real_names: HashSet<String> = entries.iter().map(|e| e.metadata.name.to_lowercase()).collect();
     let mut written: HashSet<String> = HashSet::new();
     let mut aliases = 0usize;
     let mut skipped_colors = 0usize;
     let mut skipped_names: Vec<String> = Vec::new();
+    let mut duplicate_names: Vec<String> = Vec::new();
 
     for entry in &entries {
         let name = &entry.metadata.name;
+        if written.contains(&name.to_lowercase()) {
+            duplicate_names.push(name.clone());
+            continue;
+        }
         let (toml, skipped) = convert(entry, None);
         skipped_colors += skipped;
         match write_scheme(&tmp, name, &toml) {
             Ok(()) => {
-                written.insert(name.clone());
+                written.insert(name.to_lowercase());
             }
             Err(_) => skipped_names.push(name.clone()),
         }
         for alias in entry.metadata.aliases.iter().flatten() {
-            if real_names.contains(alias.as_str()) || written.contains(alias) {
+            let key = alias.to_lowercase();
+            if real_names.contains(&key) || written.contains(&key) {
                 continue;
             }
             let (toml, _) = convert(entry, Some(alias));
             match write_scheme(&tmp, alias, &toml) {
                 Ok(()) => {
-                    written.insert(alias.clone());
+                    written.insert(key);
                     aliases += 1;
                 }
                 Err(_) => skipped_names.push(alias.clone()),
@@ -147,6 +155,14 @@ pub fn install(stdout: &mut Stdout, yes: bool) -> Result<()> {
     )?;
     if !skipped_names.is_empty() {
         writeln!(stdout, "Skipped {} scheme(s) with unsafe names: {}", skipped_names.len(), skipped_names.join(", "))?;
+    }
+    if !duplicate_names.is_empty() {
+        writeln!(
+            stdout,
+            "Skipped {} scheme(s) whose names differ from another only by case: {}",
+            duplicate_names.len(),
+            duplicate_names.join(", ")
+        )?;
     }
     writeln!(
         stdout,

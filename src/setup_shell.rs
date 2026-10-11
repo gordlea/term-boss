@@ -30,11 +30,13 @@ impl ValueEnum for SetupShell {
     }
 }
 
+/// `autoload` is idempotent, so this works whether or not .zshrc already loaded `add-zsh-hook`.
 const SETUP_ZSH: &str =
-"_iterm_tab_autoload_hook () {\n\
+"autoload -Uz add-zsh-hook\n\
+_term_boss_chpwd_hook () {\n\
     term-boss set\n\
 }\n\
-add-zsh-hook chpwd _iterm_tab_autoload_hook\n\
+add-zsh-hook chpwd _term_boss_chpwd_hook\n\
 ";
 
 impl SetupShell {

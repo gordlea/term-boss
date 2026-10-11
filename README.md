@@ -15,11 +15,10 @@ cargo install --path .
 ### Shell hook
 
 `term-boss env zsh` prints a `chpwd` hook that runs `term-boss set` on every directory change.
-Add it to `~/.zshrc` after `add-zsh-hook` is loaded, and call `term-boss set` once so a new
-shell picks up the current directory's settings:
+Add it to `~/.zshrc`, and call `term-boss set` once so a new shell picks up the current
+directory's settings:
 
 ```sh
-autoload -Uz add-zsh-hook
 eval "$(term-boss env zsh)"
 term-boss set
 ```

@@ -9,7 +9,7 @@ use anyhow::Result;
 use crate::{
     config::{self, SchemeOrigin, SetConfig, Source},
     detect, setup_wezterm,
-    terminal_app::TerminalApp,
+    terminal_app::{self, TerminalApp},
 };
 
 /// Explain what `term-boss set` would do from the current directory, without doing it.
@@ -29,8 +29,7 @@ pub fn run(cli: &SetConfig, stdout: &mut Stdout) -> Result<()> {
         writeln!(stdout, "  {var}={}", value.as_deref().unwrap_or("(unset)"))?;
     }
     if terminal == TerminalApp::Konsole {
-        let dbus = env::var_os("KONSOLE_DBUS_SERVICE").is_some() && env::var_os("KONSOLE_DBUS_SESSION").is_some();
-        if dbus {
+        if terminal_app::konsole_dbus_available() {
             writeln!(stdout, "  D-Bus (badge, tab-colour reset): available")?;
         } else {
             writeln!(stdout, "  D-Bus (badge, tab-colour reset): unavailable (KONSOLE_DBUS_SERVICE / KONSOLE_DBUS_SESSION not set)")?;
@@ -110,14 +109,9 @@ pub fn run(cli: &SetConfig, stdout: &mut Stdout) -> Result<()> {
     for line in describe(&resolution.config, true) {
         writeln!(stdout, "  {line}")?;
     }
-    if let Some(badge) = &resolution.config.badgetext
-        && terminal.supports_tab_name()
-        && !terminal.supports_badge()
-    {
-        let title = match &resolution.config.tabname {
-            Some(name) => format!("{name} [{badge}]"),
-            None => format!("[{badge}]"),
-        };
+    let (tabname, badgetext) = (resolution.config.tabname.as_deref(), resolution.config.badgetext.as_deref());
+    if terminal.badge_in_title(badgetext) {
+        let title = terminal.effective_title(tabname, badgetext).unwrap_or_default();
         writeln!(stdout, "  note: {terminal:?} has no badge, so the tab title becomes {title:?}")?;
     }
     Ok(())

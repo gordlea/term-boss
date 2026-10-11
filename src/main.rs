@@ -50,14 +50,8 @@ fn main() -> anyhow::Result<()> {
 
             let config = read_hierarchial_config(cli_set_config)?;
 
-            // A terminal with tabs but no badge shows the badge in the title: `name [badge]`.
-            let badge_in_title = config.badgetext.is_some() && !terminal_app.supports_badge();
-            let badge_for_title = if badge_in_title { config.badgetext.as_deref() } else { None };
-            let tabname = match (&config.tabname, badge_for_title) {
-                (Some(name), Some(badge)) => Some(format!("{name} [{badge}]")),
-                (None, Some(badge)) => Some(format!("[{badge}]")),
-                (name, None) => name.clone(),
-            };
+            let badge_in_title = terminal_app.badge_in_title(config.badgetext.as_deref());
+            let tabname = terminal_app.effective_title(config.tabname.as_deref(), config.badgetext.as_deref());
 
             if config.reset {
                 // Only reset what is not about to be set, so a `cd` doesn't flicker
