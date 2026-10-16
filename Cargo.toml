@@ -1,7 +1,7 @@
 # cargo-features = ["profile-rustflags"]
 [package]
 name = "term-boss"
-version = "0.1.0"
+version = "1.0.0"
 description = "Theme your terminal per directory: tab colour and name, badge and colour scheme from .term-boss.toml files"
 license = "MIT"
 repository = "https://github.com/gordlea/term-boss"
