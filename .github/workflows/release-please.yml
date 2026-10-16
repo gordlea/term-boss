@@ -72,7 +72,7 @@ jobs:
           set -euo pipefail
           name="term-boss-${TAG}-${{ matrix.target }}"
           mkdir -p "dist/${name}"
-          cp "target/${{ matrix.target }}/release/term-boss" README.md "dist/${name}/"
+          cp "target/${{ matrix.target }}/release/term-boss" README.md LICENSE "dist/${name}/"
           tar -C dist -czf "dist/${name}.tar.gz" "${name}"
           if command -v sha256sum >/dev/null; then
             (cd dist && sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256")
@@ -84,3 +84,45 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "$TAG" dist/*.tar.gz dist/*.sha256 --clobber
+
+  # Point the Homebrew tap at the new release.
+  homebrew:
+    needs: [release-please, build]
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ needs.release-please.outputs.tag_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: src
+
+      - uses: actions/checkout@v4
+        with:
+          repository: gordlea/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Download release checksums
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*.sha256' --dir sha
+
+      - name: Render formula
+        run: |
+          mkdir -p tap/Formula
+          src/scripts/homebrew-formula.sh "$TAG" "$GITHUB_REPOSITORY" "$GITHUB_SERVER_URL" sha > tap/Formula/term-boss.rb
+          cat tap/Formula/term-boss.rb
+
+      - name: Push to tap
+        working-directory: tap
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/term-boss.rb
+          if git diff --cached --quiet; then
+            echo "Formula already up to date."
+          else
+            git commit -m "term-boss ${TAG}"
+            git push
+          fi

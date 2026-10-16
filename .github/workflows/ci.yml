@@ -29,8 +29,13 @@ jobs:
           export XDG_CONFIG_HOME="$RUNNER_TEMP/xdg"
           mkdir -p "$XDG_CONFIG_HOME/term-boss/color_schemes"
           cp examples/custom-scheme-file/nord.toml "$XDG_CONFIG_HOME/term-boss/color_schemes/"
-          for dir in $(find examples -name .term-boss.toml -printf '%h\n' | sort); do
-            case "$dir" in examples/library-scheme) continue ;; esac   # needs the downloaded library
+          # Run from a copy outside the checkout: configs are resolved up to /, and the repo's
+          # own .term-boss.toml selects a library scheme that is not installed here.
+          copy=$(mktemp -d "$RUNNER_TEMP/examples.XXXXXX")
+          cp -r examples/. "$copy"
+          cd "$copy"
+          for dir in $(find . -name .term-boss.toml -printf '%h\n' | sort); do
+            case "$dir" in ./library-scheme) continue ;; esac   # needs the downloaded library
             (cd "$dir" && TERM_PROGRAM=iTerm.app "$bin" set > /dev/null)
           done
-          TERM_PROGRAM=iTerm.app "$bin" show > /dev/null
+          (cd nested-configs/backend/prod && TERM_PROGRAM=iTerm.app "$bin" show > /dev/null)

@@ -8,9 +8,20 @@ escape sequences, so nothing needs to be running in the background.
 
 ## Install
 
+With Homebrew on macOS or Linux:
+
+```sh
+brew install gordlea/tap/term-boss
+```
+
+Or from source:
+
 ```sh
 cargo install --path .
 ```
+
+Prebuilt tarballs for macOS and Linux (x86_64 and aarch64) are attached to each
+[release](https://github.com/gordlea/term-boss/releases).
 
 ### Shell hook
 
@@ -414,3 +425,7 @@ TERM_PROGRAM=iTerm.app ./target/release/term-boss set --tabcolor tomato | cat -v
 ```
 
 Piping through `cat -v` shows the raw escape sequences instead of applying them.
+
+Releases are cut by release-please from conventional commits on `main`. The release workflow
+builds the tarballs, attaches them to the GitHub release and rewrites the formula in
+[gordlea/homebrew-tap](https://github.com/gordlea/homebrew-tap) from their checksums.
