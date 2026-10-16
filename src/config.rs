@@ -20,13 +20,18 @@ pub type Palette = BTreeMap<TermColorMapping, ColorSpec>;
 /// Reach new heights.
 #[command(version, about, long_about = None)]
 pub struct SetConfig {
+    /// Tab (or window) title. `${host}`, `${git_branch}`, `${repo}` and other built-ins, or
+    /// `${VAR}` for an environment variable; `${VAR:-fallback}`, `${VAR:+text}`; `$${` is a
+    /// literal `${`.
     #[arg(long, env = "TERM_BOSS_NAME")]
     pub tabname: Option<String>,
 
-    /// What badgetext you would like. Works with emojis. Can use variables from iterm
-    /// by wrapping in single quotes. Example `--badgetext '\(hostname)'`
-    /// See: https://iterm2.com/documentation-variables.html
-    /// On wezterm the text is shown verbatim in the right status area (no interpolation).
+    /// Badge text. Works with emojis. Expands built-ins such as `${host}` and `${git_branch}`
+    /// and `${VAR}` environment variables (except names that look like secrets);
+    /// `${VAR:-fallback}`, `${VAR:+text}`; `$${` is a literal `${`.
+    /// On iTerm2 the text may also use iTerm's own variables, e.g. `--badgetext '\(hostname)'`,
+    /// see https://iterm2.com/documentation-variables.html. Terminals without a badge show it
+    /// in the tab title as `name [badge]`.
     #[arg(long, env = "TERM_BOSS_BADGETEXT")]
     pub badgetext: Option<String>,
 

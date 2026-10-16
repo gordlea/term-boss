@@ -1,0 +1,8 @@
+# Tab name and badge built from variables. Lowercase names are built-ins resolved by term-boss
+# (host, hostname, username, pwd, pwd_short, dir, tty, git_branch, repo, terminal); anything
+# else is an environment variable. `${X:-fallback}` applies when X is unset or empty,
+# `${X:+text}` only when it is set. `$${` writes a literal `${`. Names that look like secrets
+# (SECRET, TOKEN, PASSWORD, CREDENTIAL, PRIVATE, *_KEY) are never expanded.
+tabname = "${repo:-${dir}}${git_branch:+ (${git_branch})}"
+badgetext = "${username}@${host} ${AWS_PROFILE:-no aws profile}"
+tabcolor = "#2b6cb0"

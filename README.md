@@ -23,6 +23,15 @@ eval "$(term-boss env zsh)"
 term-boss set
 ```
 
+If your tab names or badges use `${VAR}` (see [Usage](#usage)) and you want them to follow
+`export`s immediately rather than on the next `cd`, install a `precmd` hook instead. It runs
+`term-boss set` before every prompt: about a millisecond, plus a `wezterm cli` or `dbus-send`
+call on WezTerm and Konsole when a tab name or badge is set.
+
+```sh
+eval "$(term-boss env zsh --hook precmd)"
+```
+
 ### WezTerm
 
 WezTerm has no escape sequence for tab colours or badges, so term-boss ships a small Lua
@@ -123,7 +132,40 @@ Resolved:
   palette = 16 slots
 ```
 
-On iTerm2 the badge text supports iTerm's variables when single-quoted, for example
+`tabname` and `badgetext` can include variables. Lowercase names are built-ins that term-boss
+resolves itself, so they work the same from the shell hook, from a manual `term-boss set` and
+under any shell. Any other name is read from the environment. Note that zsh's `HOST`, `USERNAME`
+and `TTY` are shell parameters, not exported variables, which is why the built-ins exist.
+
+| Built-in | Value |
+|---|---|
+| `${hostname}` | full hostname |
+| `${host}` | hostname up to the first dot, like zsh's `%m` |
+| `${username}` | login name |
+| `${pwd}` | current directory |
+| `${pwd_short}` | current directory with your home shown as `~`, like zsh's `%~` |
+| `${dir}` | last component of the current directory |
+| `${tty}` | terminal device, e.g. `/dev/pts/3` |
+| `${git_branch}` | current branch, a short hash when detached, unset outside a repository |
+| `${repo}` | name of the directory containing `.git` |
+| `${terminal}` | the detected terminal: `Iterm2`, `Wezterm`, `Konsole`, `Alacritty` or `Generic` |
+
+`${X}` expands to the value, or nothing if unset. `${X:-fallback}` uses the fallback when `X`
+is unset or empty; `${X:+text}` uses the text only when `X` is set. Both may contain further
+references. Expanded values themselves are never re-expanded. A `$` not followed by `{` is
+literal (`$5`, `$$$`), and `$${` writes a literal `${`. Malformed references are left as they
+are. A value that expands to nothing is treated as unset, so `badgetext = "${AWS_PROFILE}"`
+shows no badge rather than an empty one. Expansion happens when `term-boss set` runs, so with
+the default hook a changed variable or branch shows up on the next `cd`; see
+[Shell hook](#shell-hook) for the `precmd` option. `term-boss show` lists the built-ins and
+prints both the raw and the expanded text.
+
+```toml
+tabname = "${repo:-${dir}}${git_branch:+ (${git_branch})}"
+badgetext = "${username}@${host} ${AWS_PROFILE:-no aws profile}"
+```
+
+On iTerm2 the badge text also supports iTerm's own variables when single-quoted, for example
 `--badgetext '\(hostname)'`. See <https://iterm2.com/documentation-variables.html>.
 
 ## Config files
@@ -136,7 +178,7 @@ which file each value came from.
 ```toml
 tabname = "api"
 tabcolor = "#2b6cb0"
-badgetext = "prod ⚠"
+badgetext = "${AWS_PROFILE:-dev} ⚠"
 fgcolor = "#eeeeee"
 bgcolor = "#1a202c"
 cursorcolor = "orange"
@@ -285,6 +327,12 @@ repositories, so they are treated as untrusted:
   is converted colour by colour, so the generated files contain only validated values.
 - Tab names and badge text have control characters stripped before they are sent to the
   terminal, so a config cannot terminate the title sequence early and smuggle in another one.
+  Values pulled in through `${…}` go through the same stripping, and are never themselves
+  expanded, so a variable whose value contains `${…}` cannot reach anything else.
+- `${VAR}` never expands variables whose names look like credentials (containing `SECRET`,
+  `TOKEN`, `PASSWORD`, `PASSWD`, `CREDENTIAL` or `PRIVATE`, or ending in `_KEY`), so a config in
+  a cloned repository cannot copy a secret into a window title, which other local processes,
+  window managers and screen recordings can read. `term-boss show` reports a refused name.
 - Unknown keys anywhere in a config or scheme are errors rather than silently ignored.
 
 ## Terminal support

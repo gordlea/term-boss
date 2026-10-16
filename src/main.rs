@@ -9,6 +9,7 @@ use crate::terminal_app::{PaneColor, TerminalApp};
 mod colors;
 mod config;
 mod detect;
+mod expand;
 mod setup_shell;
 mod scheme;
 mod setup;
@@ -48,7 +49,8 @@ fn main() -> anyhow::Result<()> {
                 return Ok(());
             }
 
-            let config = read_hierarchial_config(cli_set_config)?;
+            let mut config = read_hierarchial_config(cli_set_config)?;
+            expand::expand_config(&mut config, &expand::Context { terminal: terminal_app });
 
             let badge_in_title = terminal_app.badge_in_title(config.badgetext.as_deref());
             let tabname = terminal_app.effective_title(config.tabname.as_deref(), config.badgetext.as_deref());
@@ -110,7 +112,7 @@ fn main() -> anyhow::Result<()> {
             show::run(cli_set_config, &mut stdout)?;
         }
         Commands::Env(env_config) => {
-            env_config.shell.output(&mut stdout);
+            env_config.shell.output(env_config.hook, &mut stdout);
         }
         Commands::Setup(setup_config) => {
             setup_config.install(&mut stdout)?;

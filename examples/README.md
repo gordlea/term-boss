@@ -25,6 +25,7 @@ TERM_PROGRAM=iTerm.app term-boss set | cat -v
 | [`custom-scheme-file/`](custom-scheme-file) | A standalone Alacritty-format scheme file in `~/.config/term-boss/color_schemes/` |
 | [`scheme-precedence/`](scheme-precedence) | Nearest scheme wins outright; explicit keys override scheme values |
 | [`home-reset/`](home-reset) | A `$HOME` config that restores defaults when you leave a themed project |
+| [`env-vars/`](env-vars) | `${VAR}` and `${VAR:-fallback}` in tab names and badge text |
 
 Configs are resolved from the current directory up to `/`, so these examples are only
 affected by any `.term-boss.toml` you have in a parent of this repository.

@@ -1,3 +1,4 @@
 tabcolor = "red"
-tabname = "goodbye"
-badgetext = "gooodbyte"
+tabname = "term boss dev (${hostname})"
+badgetext = "development environment on ${hostname}"
+scheme = "Adventure Time (Gogh)"

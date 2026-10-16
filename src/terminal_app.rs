@@ -106,7 +106,7 @@ fn konsole_dbus(method: &str, args: &[DbusArg]) -> bool {
 
 /// The emit methods below write for every variant, including `Unknown`: deciding whether to
 /// emit at all is the caller's job (`term-boss set` exits early for `Unknown`).
-#[derive(Debug, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TerminalApp {
     #[default]
     Unknown,

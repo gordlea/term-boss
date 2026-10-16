@@ -8,7 +8,7 @@ use anyhow::Result;
 
 use crate::{
     config::{self, SchemeOrigin, SetConfig, Source},
-    detect, setup_wezterm,
+    detect, expand, setup_wezterm,
     terminal_app::{self, TerminalApp},
 };
 
@@ -109,11 +109,37 @@ pub fn run(cli: &SetConfig, stdout: &mut Stdout) -> Result<()> {
         Some((name, SchemeOrigin::Dir(path))) => writeln!(stdout, "\nScheme: {name} (file {})", path.display())?,
     }
 
+    let ctx = expand::Context { terminal };
+    writeln!(stdout, "\nBuilt-in variables:")?;
+    for (name, value) in expand::builtins(&ctx) {
+        match value {
+            Some(v) => writeln!(stdout, "  ${{{name}}} = {v:?}")?,
+            None => writeln!(stdout, "  ${{{name}}} = (unset)")?,
+        }
+    }
+
+    let raw = &resolution.config;
+    let mut expanded = raw.clone();
+    expand::expand_config(&mut expanded, &ctx);
+
     writeln!(stdout, "\nResolved:")?;
-    for line in describe(&resolution.config, true) {
+    for line in describe(raw, true) {
         writeln!(stdout, "  {line}")?;
     }
-    let (tabname, badgetext) = (resolution.config.tabname.as_deref(), resolution.config.badgetext.as_deref());
+    for (key, before, after) in [
+        ("tabname", &raw.tabname, &expanded.tabname),
+        ("badgetext", &raw.badgetext, &expanded.badgetext),
+    ] {
+        if before != after
+            && let Some(after) = after
+        {
+            writeln!(stdout, "  {key} expands to {after:?}")?;
+        }
+        for name in before.as_deref().map(|t| expand::blocked_vars(t, &ctx)).unwrap_or_default() {
+            writeln!(stdout, "  note: ${{{name}}} in {key} is not expanded (looks like a secret)")?;
+        }
+    }
+    let (tabname, badgetext) = (expanded.tabname.as_deref(), expanded.badgetext.as_deref());
     if terminal.badge_in_title(badgetext) {
         let title = terminal.effective_title(tabname, badgetext).unwrap_or_default();
         writeln!(stdout, "  note: {terminal:?} has no badge, so the tab title becomes {title:?}")?;
