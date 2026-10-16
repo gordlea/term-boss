@@ -56,6 +56,31 @@ when they started. If `~/.config/wezterm/wezterm.lua` did not exist before you r
 press `Ctrl+Shift+R` in each open window or restart WezTerm. `term-boss show` reports whether
 the module is installed and required.
 
+### VS Code
+
+VS Code's integrated terminal is xterm.js, so pane colours and the palette work as they do
+everywhere else. Tab names arrive too, but VS Code labels tabs with the shell's process name
+unless its `terminal.integrated.tabs.title` setting is `${sequence}`, "the title provided by
+the process". Set it once:
+
+```sh
+term-boss setup vscode
+```
+
+This shows the current value, asks for confirmation, keeps a copy of `settings.json` as
+`settings.json.term-boss.bak`, and adds the key. VS Code applies the change immediately. If your
+`settings.json` contains comments or trailing commas, or you use VS Code Insiders, VSCodium or
+Cursor, add the line yourself:
+
+```json
+"terminal.integrated.tabs.title": "${sequence}"
+```
+
+VS Code has no escape sequence for tab colours, so `tabcolor` is ignored there and the badge is
+appended to the title. Its `terminal.integrated.minimumContrastRatio` setting (default 4.5) may
+lighten or darken low-contrast foreground colours from a scheme. `term-boss show` reports
+whether the setting is in place.
+
 ### Colour scheme library
 
 Optionally fetch the roughly 1000 colour schemes built into
@@ -340,17 +365,17 @@ repositories, so they are treated as untrusted:
 Legend: **✓** native support · **title** shown in the tab/window title instead · **–** not
 available · **n/a** the terminal has no such thing.
 
-| Feature | iTerm2 | WezTerm | Alacritty | Konsole | Other* |
-|---|---|---|---|---|---|
-| Detected by | `TERM_PROGRAM=iTerm.app` or `ITERM_SESSION_ID` | `TERM_PROGRAM=WezTerm` or `WEZTERM_PANE` | `ALACRITTY_WINDOW_ID`, `ALACRITTY_SOCKET` or `TERM` containing `alacritty` | `KONSOLE_VERSION` | any other `TERM` except `dumb` |
-| Tab colour | ✓ OSC 6 | ✓ user var + Lua module | n/a (no tabs) | ✓ OSC 34 | – |
-| Tab name | ✓ OSC 0 | ✓ `wezterm cli set-tab-title` | ✓ OSC 0 (window title) | ✓ OSC 30 | ✓ OSC 0 (window title) |
-| Badge text | ✓ OSC 1337 badge | ✓ user var, right status | title | ✓ D-Bus badge overlay; title if D-Bus is unavailable | title |
-| Pane foreground / background / cursor | ✓ OSC 10 / 11 / 12 | ✓ | ✓ | ✓ | ✓ |
-| 16-colour ANSI palette | ✓ OSC 4 | ✓ | ✓ | ✓ | ✓ |
-| `reset` of the above | ✓ | ✓ | ✓ | ✓ (tab colour via D-Bus; title → `%d : %n`) | ✓ |
-| Extra setup | – | `term-boss setup wezterm` once | – | `dbus-send` or `busctl` on PATH for badge and tab-colour reset | – |
-| Verified on | not re-tested here (original target) | 20261005 | 0.17 | 26.08 | xterm 411 |
+| Feature | iTerm2 | WezTerm | Alacritty | Konsole | VS Code | Other* |
+|---|---|---|---|---|---|---|
+| Detected by | `TERM_PROGRAM=iTerm.app` or `ITERM_SESSION_ID` | `TERM_PROGRAM=WezTerm` or `WEZTERM_PANE` | `ALACRITTY_WINDOW_ID`, `ALACRITTY_SOCKET` or `TERM` containing `alacritty` | `KONSOLE_VERSION` | `TERM_PROGRAM=vscode` | any other `TERM` except `dumb` |
+| Tab colour | ✓ OSC 6 | ✓ user var + Lua module | n/a (no tabs) | ✓ OSC 34 | – | – |
+| Tab name | ✓ OSC 0 | ✓ `wezterm cli set-tab-title` | ✓ OSC 0 (window title) | ✓ OSC 30 | ✓ OSC 0 (tab shows it once `tabs.title` is `${sequence}`) | ✓ OSC 0 (window title) |
+| Badge text | ✓ OSC 1337 badge | ✓ user var, right status | title | ✓ D-Bus badge overlay; title if D-Bus is unavailable | title | title |
+| Pane foreground / background / cursor | ✓ OSC 10 / 11 / 12 | ✓ | ✓ | ✓ | ✓ | ✓ |
+| 16-colour ANSI palette | ✓ OSC 4 | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `reset` of the above | ✓ | ✓ | ✓ | ✓ (tab colour via D-Bus; title → `%d : %n`) | ✓ | ✓ |
+| Extra setup | – | `term-boss setup wezterm` once | – | `dbus-send` or `busctl` on PATH for badge and tab-colour reset | `term-boss setup vscode` once | – |
+| Verified on | not re-tested here (original target) | 20261005 | 0.17 | 26.08 | 1.142 (settings and xterm.js support checked; not yet run live) | xterm 411 |
 
 \* Any unrecognised terminal (xterm, kitty, foot, GNOME Terminal, Ghostty, Windows Terminal,
 …) gets the standard xterm escapes: OSC 0 for the title, OSC 10/11/12 for pane colours and
@@ -362,7 +387,9 @@ Where a terminal has tabs or a window title but no badge, the badge is appended 
 which terminal was detected, the evidence it used, and this fallback when it applies.
 
 Detection checks `TERM_PROGRAM` first, then the terminal-specific variables, then `TERM`.
-Alacritty is recognised even when its config sets `TERM` to `xterm-256color`.
+Alacritty is recognised even when its config sets `TERM` to `xterm-256color`. VS Code's
+integrated terminal is recognised by `TERM_PROGRAM=vscode`; see [VS Code](#vs-code) for the one
+setting it needs to show tab names.
 
 Konsole notes: the tab title uses Konsole's own OSC 30, so it shows regardless of the profile's
 title format, and resetting it restores Konsole's default format `%d : %n`. Konsole expands

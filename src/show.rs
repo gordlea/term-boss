@@ -8,7 +8,9 @@ use anyhow::Result;
 
 use crate::{
     config::{self, SchemeOrigin, SetConfig, Source},
-    detect, expand, setup_wezterm,
+    detect, expand,
+    setup_vscode::{self, SettingsState, TITLE_KEY, TITLE_VALUE},
+    setup_wezterm,
     terminal_app::{self, TerminalApp},
 };
 
@@ -19,6 +21,10 @@ pub fn run(cli: &SetConfig, stdout: &mut Stdout) -> Result<()> {
         TerminalApp::Unknown => {
             writeln!(stdout, "Terminal: Unknown (TERM unset or \"dumb\"; term-boss set would exit without output)")?
         }
+        TerminalApp::Vscode => writeln!(
+            stdout,
+            "Terminal: Vscode (VS Code integrated terminal: title, pane colours, palette; no tab colour or badge)"
+        )?,
         TerminalApp::Generic => writeln!(
             stdout,
             "Terminal: Generic (unrecognised; standard escapes only: title, pane colours, palette; no tab colour or badge)"
@@ -37,6 +43,27 @@ pub fn run(cli: &SetConfig, stdout: &mut Stdout) -> Result<()> {
                 "  D-Bus (badge, tab-colour reset): unavailable (KONSOLE_DBUS_SERVICE / KONSOLE_DBUS_SESSION not \
                  set, dbus-send/busctl missing, or the call failed)"
             )?;
+        }
+    }
+    if terminal == TerminalApp::Vscode {
+        const HIDDEN: &str = "tab names hidden (run: term-boss setup vscode)";
+        match setup_vscode::status() {
+            Ok(status) => match &status.state {
+                SettingsState::Found { title: Some(t) } if status.tab_titles_visible() => {
+                    writeln!(stdout, "  {TITLE_KEY} = {t:?}: tab names visible")?
+                }
+                SettingsState::Found { title: Some(t) } => writeln!(stdout, "  {TITLE_KEY} = {t:?}: {HIDDEN}")?,
+                SettingsState::Found { title: None } => {
+                    writeln!(stdout, "  {TITLE_KEY} unset (default \"${{process}}\"): {HIDDEN}")?
+                }
+                SettingsState::Missing => writeln!(stdout, "  no {}: {HIDDEN}", status.path.display())?,
+                SettingsState::Unparseable => writeln!(
+                    stdout,
+                    "  {} has comments or trailing commas; add \"{TITLE_KEY}\": \"{TITLE_VALUE}\" by hand to show tab names",
+                    status.path.display()
+                )?,
+            },
+            Err(e) => writeln!(stdout, "  VS Code settings status unavailable: {e:#}")?,
         }
     }
     if terminal == TerminalApp::Wezterm {

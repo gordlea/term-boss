@@ -114,6 +114,9 @@ pub enum TerminalApp {
     Alacritty,
     Wezterm,
     Konsole,
+    /// VS Code's integrated terminal: standard escapes. The tab shows the OSC 0 title only when
+    /// `terminal.integrated.tabs.title` is `${sequence}` (see `term-boss setup vscode`).
+    Vscode,
     /// Any other real terminal: standard escapes only (OSC 0, 4, 10, 11, 12 and their resets).
     Generic,
 }
@@ -139,7 +142,7 @@ impl TerminalApp {
         match self {
             TerminalApp::Iterm2 | TerminalApp::Wezterm => true,
             TerminalApp::Konsole => konsole_dbus_available(),
-            TerminalApp::Alacritty | TerminalApp::Generic | TerminalApp::Unknown => false,
+            TerminalApp::Alacritty | TerminalApp::Vscode | TerminalApp::Generic | TerminalApp::Unknown => false,
         }
     }
 
@@ -172,13 +175,13 @@ impl TerminalApp {
                 // string becomes an invalid QColor, which is Konsole's "no tab colour".
                 konsole_dbus("setTabColor", &[DbusArg::Str("")]);
             }
-            TerminalApp::Alacritty | TerminalApp::Generic | TerminalApp::Unknown => { /* no op */ }
+            TerminalApp::Alacritty | TerminalApp::Vscode | TerminalApp::Generic | TerminalApp::Unknown => { /* no op */ }
         }
     }
 
     pub fn reset_tab_name(&self, stdout: &mut Stdout) {
         match self {
-            TerminalApp::Iterm2 | TerminalApp::Alacritty | TerminalApp::Generic => {
+            TerminalApp::Iterm2 | TerminalApp::Alacritty | TerminalApp::Vscode | TerminalApp::Generic => {
                 let _ = stdout.write_all(OSC0_RESET_TAB_NAME.as_bytes());
             }
             TerminalApp::Konsole => {
@@ -214,7 +217,7 @@ impl TerminalApp {
                     konsole_dbus("setBadgeEnabled", &[DbusArg::Bool(true)]);
                 }
             }
-            TerminalApp::Alacritty | TerminalApp::Generic | TerminalApp::Unknown => { /* no op */ }
+            TerminalApp::Alacritty | TerminalApp::Vscode | TerminalApp::Generic | TerminalApp::Unknown => { /* no op */ }
         }
     }
 
@@ -233,14 +236,14 @@ impl TerminalApp {
                 // Konsole-specific OSC 34 "session colour" = tab colour.
                 let _ = write!(stdout, "\x1B]34;#{:x}\x07", tabcolor);
             }
-            TerminalApp::Alacritty | TerminalApp::Generic | TerminalApp::Unknown => { /* no op */ }
+            TerminalApp::Alacritty | TerminalApp::Vscode | TerminalApp::Generic | TerminalApp::Unknown => { /* no op */ }
         }
     }
 
     pub fn set_tab_name(&self, stdout: &mut Stdout, tabname: &str) {
         let tabname = &*sanitize(tabname);
         match self {
-            TerminalApp::Iterm2 | TerminalApp::Alacritty | TerminalApp::Generic => {
+            TerminalApp::Iterm2 | TerminalApp::Alacritty | TerminalApp::Vscode | TerminalApp::Generic => {
                 let _ = write!(stdout, "\x1B]0;{}\x07", tabname);
             }
             TerminalApp::Konsole => {

@@ -4,8 +4,9 @@ use crate::terminal_app::TerminalApp;
 
 /// Environment variables shown by `term-boss show`: the ones `detect_terminal` consults, plus the
 /// Konsole D-Bus coordinates its badge and tab-colour reset need.
-pub const DETECTION_VARS: [&str; 9] = [
+pub const DETECTION_VARS: [&str; 10] = [
     "TERM_PROGRAM",
+    "TERM_PROGRAM_VERSION",
     "TERM",
     "KONSOLE_VERSION",
     "ALACRITTY_WINDOW_ID",
@@ -27,6 +28,7 @@ pub fn detect_terminal() -> TerminalApp {
         match term_program.as_str() {
             "iTerm.app" => TerminalApp::Iterm2,
             "WezTerm" => TerminalApp::Wezterm,
+            "vscode" => TerminalApp::Vscode,
             _ => TerminalApp::Unknown,
         }
     } else {

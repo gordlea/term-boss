@@ -14,6 +14,7 @@ mod setup_shell;
 mod scheme;
 mod setup;
 mod setup_colorschemes;
+mod setup_vscode;
 mod setup_wezterm;
 mod show;
 mod terminal_app;
