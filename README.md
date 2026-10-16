@@ -151,6 +151,14 @@ CLI / env:
 
 Scheme: repo (inline, defined in /home/me/dev/api/.term-boss.toml)
 
+Built-in variables:
+  ${hostname} = "box.local"
+  ${host} = "box"
+  ...
+  ${git_branch} = "main"
+  ${repo} = "api"
+  ${terminal} = "Wezterm"
+
 Resolved:
   tabname = "backend"
   ...
@@ -375,7 +383,7 @@ available · **n/a** the terminal has no such thing.
 | 16-colour ANSI palette | ✓ OSC 4 | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `reset` of the above | ✓ | ✓ | ✓ | ✓ (tab colour via D-Bus; title → `%d : %n`) | ✓ | ✓ |
 | Extra setup | – | `term-boss setup wezterm` once | – | `dbus-send` or `busctl` on PATH for badge and tab-colour reset | `term-boss setup vscode` once | – |
-| Verified on | not re-tested here (original target) | 20261005 | 0.17 | 26.08 | 1.142 (settings and xterm.js support checked; not yet run live) | xterm 411 |
+| Verified on | not re-tested here (original target) | 20261005 | 0.17 | 26.08 | 1.142 | xterm 411 |
 
 \* Any unrecognised terminal (xterm, kitty, foot, GNOME Terminal, Ghostty, Windows Terminal,
 …) gets the standard xterm escapes: OSC 0 for the title, OSC 10/11/12 for pane colours and
