@@ -3,7 +3,7 @@
 Per-directory terminal theming. Drop a `.term-boss.toml` in a project and your tab colour,
 tab title, badge, pane colours and ANSI palette change whenever you `cd` into it.
 
-Works with iTerm2, WezTerm, Alacritty and Konsole. Settings are applied with standard
+Works with iTerm2, WezTerm, Alacritty, Konsole, VS Code and Ghostty. Settings are applied with standard
 escape sequences, so nothing needs to be running in the background.
 
 ## Install
@@ -192,7 +192,7 @@ and `TTY` are shell parameters, not exported variables, which is why the built-i
 | `${tty}` | terminal device, e.g. `/dev/pts/3` |
 | `${git_branch}` | current branch, a short hash when detached, unset outside a repository |
 | `${repo}` | name of the directory containing `.git` |
-| `${terminal}` | the detected terminal: `Iterm2`, `Wezterm`, `Konsole`, `Alacritty` or `Generic` |
+| `${terminal}` | the detected terminal: `Iterm2`, `Wezterm`, `Konsole`, `Alacritty`, `Vscode`, `Ghostty` or `Generic` |
 
 `${X}` expands to the value, or nothing if unset. `${X:-fallback}` uses the fallback when `X`
 is unset or empty; `${X:+text}` uses the text only when `X` is set. Both may contain further
@@ -384,19 +384,19 @@ repositories, so they are treated as untrusted:
 Legend: **✓** native support · **title** shown in the tab/window title instead · **–** not
 available · **n/a** the terminal has no such thing.
 
-| Feature | iTerm2 | WezTerm | Alacritty | Konsole | VS Code | Other* |
-|---|---|---|---|---|---|---|
-| Detected by | `TERM_PROGRAM=iTerm.app` or `ITERM_SESSION_ID` | `TERM_PROGRAM=WezTerm` or `WEZTERM_PANE` | `ALACRITTY_WINDOW_ID`, `ALACRITTY_SOCKET` or `TERM` containing `alacritty` | `KONSOLE_VERSION` | `TERM_PROGRAM=vscode` | any other `TERM` except `dumb` |
-| Tab colour | ✓ OSC 6 | ✓ user var + Lua module | n/a (no tabs) | ✓ OSC 34 | – | – |
-| Tab name | ✓ OSC 0 | ✓ `wezterm cli set-tab-title` | ✓ OSC 0 (window title) | ✓ OSC 30 | ✓ OSC 0 (tab shows it once `tabs.title` is `${sequence}`) | ✓ OSC 0 (window title) |
-| Badge text | ✓ OSC 1337 badge | ✓ user var, right status | title | ✓ D-Bus badge overlay; title if D-Bus is unavailable | title | title |
-| Pane foreground / background / cursor | ✓ OSC 10 / 11 / 12 | ✓ | ✓ | ✓ | ✓ | ✓ |
-| 16-colour ANSI palette | ✓ OSC 4 | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `reset` of the above | ✓ | ✓ | ✓ | ✓ (tab colour via D-Bus; title → `%d : %n`) | ✓ | ✓ |
-| Extra setup | – | `term-boss setup wezterm` once | – | `dbus-send` or `busctl` on PATH for badge and tab-colour reset | `term-boss setup vscode` once | – |
-| Verified on | not re-tested here (original target) | 20261005 | 0.17 | 26.08 | 1.142 | xterm 411 |
+| Feature | iTerm2 | WezTerm | Alacritty | Konsole | VS Code | Ghostty | Other* |
+|---|---|---|---|---|---|---|---|
+| Detected by | `TERM_PROGRAM=iTerm.app` or `ITERM_SESSION_ID` | `TERM_PROGRAM=WezTerm` or `WEZTERM_PANE` | `ALACRITTY_WINDOW_ID`, `ALACRITTY_SOCKET` or `TERM` containing `alacritty` | `KONSOLE_VERSION` | `TERM_PROGRAM=vscode` | `TERM_PROGRAM=ghostty` (or `GHOSTTY_RESOURCES_DIR`) | any other `TERM` except `dumb` |
+| Tab colour | ✓ OSC 6 | ✓ user var + Lua module | n/a (no tabs) | ✓ OSC 34 | – | – | – |
+| Tab name | ✓ OSC 0 | ✓ `wezterm cli set-tab-title` | ✓ OSC 0 (window title) | ✓ OSC 30 | ✓ OSC 0 (tab shows it once `tabs.title` is `${sequence}`) | ✓ OSC 0 | ✓ OSC 0 (window title) |
+| Badge text | ✓ OSC 1337 badge | ✓ user var, right status | title | ✓ D-Bus badge overlay; title if D-Bus is unavailable | title | title | title |
+| Pane foreground / background / cursor | ✓ OSC 10 / 11 / 12 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| 16-colour ANSI palette | ✓ OSC 4 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `reset` of the above | ✓ | ✓ | ✓ | ✓ (tab colour via D-Bus; title → `%d : %n`) | ✓ | ✓ | ✓ |
+| Extra setup | – | `term-boss setup wezterm` once | – | `dbus-send` or `busctl` on PATH for badge and tab-colour reset | `term-boss setup vscode` once | – | – |
+| Verified on | not re-tested here (original target) | 20261005 | 0.17 | 26.08 | 1.142 | not tested here | xterm 411 |
 
-\* Any unrecognised terminal (xterm, kitty, foot, GNOME Terminal, Ghostty, Windows Terminal,
+\* Any unrecognised terminal (xterm, kitty, foot, GNOME Terminal, Windows Terminal,
 …) gets the standard xterm escapes: OSC 0 for the title, OSC 10/11/12 for pane colours and
 OSC 4 for the palette. When `TERM` is unset or `dumb` (scripts, Emacs shells, CI),
 `term-boss set` exits silently without emitting anything.
@@ -416,6 +416,12 @@ title format, and resetting it restores Konsole's default format `%d : %n`. Kons
 through Konsole's session D-Bus interface, which Konsole advertises to the shell as
 `KONSOLE_DBUS_SERVICE` and `KONSOLE_DBUS_SESSION`. Older Konsole releases ignore the sequences
 they do not know.
+
+Ghostty notes: Ghostty supports the standard title, pane-colour and palette escapes, and its
+tab label is the title of the active split, so `tabname` shows in the tab on macOS and GTK.
+It has no escape sequence for tab colour (the macOS colour picker in 1.3 is right-click only)
+or for a badge, so `tabcolor` is ignored and the badge is folded into the title. A `title` key
+in the Ghostty config, or a tab title set by hand, makes Ghostty ignore title escapes.
 
 ## Development
 

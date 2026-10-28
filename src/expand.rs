@@ -452,6 +452,7 @@ mod tests {
         assert!(tty.is_empty() || tty.starts_with("/dev/"), "{tty}");
         assert_eq!(expand("${terminal}", &ctx), "Generic");
         assert_eq!(expand("${terminal}", &Context { terminal: TerminalApp::Iterm2 }), "Iterm2");
+        assert_eq!(expand("${terminal}", &Context { terminal: TerminalApp::Ghostty }), "Ghostty");
     }
 
     #[test]

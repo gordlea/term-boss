@@ -39,3 +39,4 @@ jobs:
             (cd "$dir" && TERM_PROGRAM=iTerm.app "$bin" set > /dev/null)
           done
           (cd nested-configs/backend/prod && TERM_PROGRAM=iTerm.app "$bin" show > /dev/null)
+          (cd standard-config && TERM_PROGRAM=ghostty "$bin" show > /dev/null)
