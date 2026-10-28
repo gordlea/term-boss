@@ -4,7 +4,7 @@ use crate::terminal_app::TerminalApp;
 
 /// Environment variables shown by `term-boss show`: the ones `detect_terminal` consults, plus the
 /// Konsole D-Bus coordinates its badge and tab-colour reset need.
-pub const DETECTION_VARS: [&str; 10] = [
+pub const DETECTION_VARS: [&str; 11] = [
     "TERM_PROGRAM",
     "TERM_PROGRAM_VERSION",
     "TERM",
@@ -13,6 +13,7 @@ pub const DETECTION_VARS: [&str; 10] = [
     "ALACRITTY_SOCKET",
     "WEZTERM_PANE",
     "ITERM_SESSION_ID",
+    "GHOSTTY_RESOURCES_DIR",
     "KONSOLE_DBUS_SERVICE",
     "KONSOLE_DBUS_SESSION",
 ];
@@ -29,6 +30,7 @@ pub fn detect_terminal() -> TerminalApp {
             "iTerm.app" => TerminalApp::Iterm2,
             "WezTerm" => TerminalApp::Wezterm,
             "vscode" => TerminalApp::Vscode,
+            "ghostty" => TerminalApp::Ghostty,
             _ => TerminalApp::Unknown,
         }
     } else {
@@ -52,6 +54,10 @@ pub fn detect_terminal() -> TerminalApp {
             term_app = TerminalApp::Wezterm;
         } else if env::var("ITERM_SESSION_ID").is_ok() {
             term_app = TerminalApp::Iterm2;
+        } else if env::var_os("GHOSTTY_RESOURCES_DIR").is_some() || env::var_os("GHOSTTY_BIN_DIR").is_some() {
+            // For shells where TERM_PROGRAM was overwritten (tmux, some rc files). Inherited by
+            // child terminals like KONSOLE_VERSION, hence last.
+            term_app = TerminalApp::Ghostty;
         }
     }
 

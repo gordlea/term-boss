@@ -25,6 +25,10 @@ pub fn run(cli: &SetConfig, stdout: &mut Stdout) -> Result<()> {
             stdout,
             "Terminal: Vscode (VS Code integrated terminal: title, pane colours, palette; no tab colour or badge)"
         )?,
+        TerminalApp::Ghostty => writeln!(
+            stdout,
+            "Terminal: Ghostty (title, pane colours, palette; no tab colour or badge escape)"
+        )?,
         TerminalApp::Generic => writeln!(
             stdout,
             "Terminal: Generic (unrecognised; standard escapes only: title, pane colours, palette; no tab colour or badge)"
