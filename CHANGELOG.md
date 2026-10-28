@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/gordlea/term-boss/compare/v1.0.0...v1.1.0) (2026-10-28)
+
+
+### Features
+
+* add support for ghostty ([#3](https://github.com/gordlea/term-boss/issues/3)) ([bbaabb6](https://github.com/gordlea/term-boss/commit/bbaabb684f1b76880395adf13843408215675b1a))
+
 ## [1.0.0](https://github.com/gordlea/term-boss/compare/v0.1.0...v1.0.0) (2026-10-16)
 
 
