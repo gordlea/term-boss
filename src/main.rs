@@ -1,7 +1,7 @@
 use std::io::Write;
 
 use clap::{Parser, Subcommand};
-use config::{SetConfig, TermColorMapping, read_hierarchial_config};
+use config::{Resolution, SetConfig, TermColorMapping, read_hierarchial_config};
 use strum::VariantArray;
 
 use crate::terminal_app::{PaneColor, TerminalApp};
@@ -29,7 +29,7 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Apply tab/pane settings from CLI flags, env vars and .term-boss.toml files
+    /// Apply tab/pane settings from CLI flags, env vars, .term-boss.toml files and the user/host-wide base configs
     Set(SetConfig),
     /// Explain what `set` would apply here and why, without changing the terminal
     Show(SetConfig),
@@ -50,8 +50,8 @@ fn main() -> anyhow::Result<()> {
                 return Ok(());
             }
 
-            let mut config = read_hierarchial_config(cli_set_config)?;
-            expand::expand_config(&mut config, &expand::Context { terminal: terminal_app });
+            let Resolution { mut config, chains, .. } = read_hierarchial_config(cli_set_config)?;
+            expand::expand_config(&mut config, &chains, &expand::Context { terminal: terminal_app });
 
             let badge_in_title = terminal_app.badge_in_title(config.badgetext.as_deref());
             let tabname = terminal_app.effective_title(config.tabname.as_deref(), config.badgetext.as_deref());

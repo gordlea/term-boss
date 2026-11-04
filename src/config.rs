@@ -1,4 +1,9 @@
-use std::{collections::BTreeMap, env, fs, io::ErrorKind, path::PathBuf};
+use std::{
+    collections::BTreeMap,
+    env, fs,
+    io::ErrorKind,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{Context, Result, bail};
 use clap::Args;
@@ -11,6 +16,10 @@ use crate::{
 };
 
 const CONFIG_FILE_NAME: &str = ".term-boss.toml";
+/// Per-user base config, inside `scheme::config_dir()` (`$XDG_CONFIG_HOME/term-boss`).
+pub const USER_CONFIG_FILE: &str = "user-base-config.toml";
+/// Host-wide base config, read for every user and every directory.
+pub const SYSTEM_CONFIG_PATH: &str = "/etc/term-boss/hostwide-base-config.toml";
 
 /// ANSI palette slot -> colour. Any subset of the 16 slots may be given.
 pub type Palette = BTreeMap<TermColorMapping, ColorSpec>;
@@ -22,13 +31,14 @@ pub type Palette = BTreeMap<TermColorMapping, ColorSpec>;
 pub struct SetConfig {
     /// Tab (or window) title. `${host}`, `${git_branch}`, `${repo}` and other built-ins, or
     /// `${VAR}` for an environment variable; `${VAR:-fallback}`, `${VAR:+text}`; `$${` is a
-    /// literal `${`.
+    /// literal `${`. `${parent}` is this field's value from the next config above.
     #[arg(long, env = "TERM_BOSS_NAME")]
     pub tabname: Option<String>,
 
     /// Badge text. Works with emojis. Expands built-ins such as `${host}` and `${git_branch}`
     /// and `${VAR}` environment variables (except names that look like secrets);
-    /// `${VAR:-fallback}`, `${VAR:+text}`; `$${` is a literal `${`.
+    /// `${VAR:-fallback}`, `${VAR:+text}`; `$${` is a literal `${`. `${parent}` is this field's
+    /// value from the next config above.
     /// On iTerm2 the text may also use iTerm's own variables, e.g. `--badgetext '\(hostname)'`,
     /// see https://iterm2.com/documentation-variables.html. Terminals without a badge show it
     /// in the tab title as `name [badge]`.
@@ -38,7 +48,8 @@ pub struct SetConfig {
     /// Name of a colour scheme: defined inline under `color_schemes` in a .term-boss.toml, an
     /// Alacritty-format `<name>.toml` in ~/.config/term-boss/color_schemes/, or one of WezTerm's
     /// built-in schemes fetched by `term-boss setup colorschemes`. Only the nearest selection (CLI,
-    /// then cwd, then parents) applies; explicit colour flags override the scheme's values.
+    /// then cwd, then parents, then the user and host-wide base configs) applies; explicit colour
+    /// flags override the scheme's values.
     #[arg(long, env = "TERM_BOSS_SCHEME")]
     pub scheme: Option<String>,
 
@@ -128,7 +139,8 @@ impl SetConfig {
         merge_field(&mut self.bgcolor, other.bgcolor, replace_existing_values);
         merge_field(&mut self.cursorcolor, other.cursorcolor, replace_existing_values);
         // A bool cannot be "unset" by a nearer level, so any level asking for a reset gets one.
-        // This is what makes a `reset = true` in $HOME/.term-boss.toml apply to every project.
+        // This is what makes a `reset = true` in the user or host-wide base config apply to every
+        // project.
         self.reset |= other.reset;
         if let Some(theirs) = other.color_mapping {
             let mine = self.color_mapping.get_or_insert_default();
@@ -142,12 +154,26 @@ impl SetConfig {
 }
 
 /// Where one level of configuration came from.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Source {
     /// CLI flags and environment variables.
     Cli,
     /// A `.term-boss.toml` at this path.
     File(PathBuf),
+    /// The per-user base config (`$XDG_CONFIG_HOME/term-boss/user-base-config.toml`).
+    User(PathBuf),
+    /// The host-wide base config (`/etc/term-boss/hostwide-base-config.toml`).
+    System(PathBuf),
+}
+
+impl Source {
+    /// The file this level was read from; `None` for the CLI.
+    pub fn path(&self) -> Option<&Path> {
+        match self {
+            Source::Cli => None,
+            Source::File(path) | Source::User(path) | Source::System(path) => Some(path),
+        }
+    }
 }
 
 /// One level of configuration: the CLI, or one config file. Nearest levels come first.
@@ -166,35 +192,89 @@ pub enum SchemeOrigin {
     Dir(PathBuf),
 }
 
+/// Raw text of one field at every level that sets it, nearest first. `${parent}` walks it.
+#[derive(Debug, Default, Clone)]
+pub struct TextChain(pub Vec<(Source, String)>);
+
+impl TextChain {
+    pub fn texts(&self) -> Vec<&str> {
+        self.0.iter().map(|(_, text)| text.as_str()).collect()
+    }
+}
+
+/// The chains of every expanded text field.
+#[derive(Debug, Default, Clone)]
+pub struct TextChains {
+    pub tabname: TextChain,
+    pub badgetext: TextChain,
+}
+
 /// The outcome of merging all levels.
 #[derive(Debug)]
 pub struct Resolution {
     pub config: SetConfig,
     /// The scheme that was applied, if any, and where it came from.
     pub scheme: Option<(String, SchemeOrigin)>,
+    /// Per-level raw text of `tabname` and `badgetext`, for `${parent}`.
+    pub chains: TextChains,
 }
 
-/// Collect the CLI/env config and every `.term-boss.toml` from the current directory up to `/`,
-/// nearest first. A file that does not parse is an error naming the file.
-pub fn load_levels(cli_set_config: &SetConfig) -> Result<Vec<Level>> {
-    let mut current_dir = env::current_dir().context("Unable to determine current dir!")?;
+/// The per-user base config path, `None` when neither `XDG_CONFIG_HOME` nor `HOME` is set.
+pub fn user_config_path() -> Option<PathBuf> {
+    scheme::config_dir().ok().map(|dir| dir.join(USER_CONFIG_FILE))
+}
 
+/// The host-wide base config path.
+pub fn system_config_path() -> PathBuf {
+    PathBuf::from(SYSTEM_CONFIG_PATH)
+}
+
+/// Read one config file as a level. A missing file is `Ok(None)`; an unreadable one is skipped
+/// with a warning; one that does not parse is an error naming the file.
+fn read_level(path: PathBuf, source: impl FnOnce(PathBuf) -> Source) -> Result<Option<Level>> {
+    match fs::read_to_string(&path) {
+        Ok(contents) => {
+            let config = toml::from_str(&contents)
+                .with_context(|| format!("Unable to read file {:?} as a valid config file", path))?;
+            Ok(Some(Level { source: source(path), config }))
+        }
+        Err(e) if e.kind() == ErrorKind::NotFound => Ok(None),
+        Err(e) => {
+            eprintln!("Unable to read file {:?}, skipping: {e}", path);
+            Ok(None)
+        }
+    }
+}
+
+/// Collect the CLI/env config, every `.term-boss.toml` from the current directory up to `/`, then
+/// the user and host-wide base configs, nearest first. A file that does not parse is an error
+/// naming the file.
+pub fn load_levels(cli_set_config: &SetConfig) -> Result<Vec<Level>> {
+    let cwd = env::current_dir().context("Unable to determine current dir!")?;
+    load_levels_from(cli_set_config, cwd, user_config_path(), Some(system_config_path()))
+}
+
+/// `load_levels` with every location passed in: `cwd` is walked up to `/`, then `user` and
+/// `system` are appended as the two lowest-precedence levels when given and present.
+pub fn load_levels_from(
+    cli_set_config: &SetConfig,
+    mut cwd: PathBuf,
+    user: Option<PathBuf>,
+    system: Option<PathBuf>,
+) -> Result<Vec<Level>> {
     let mut levels = vec![Level { source: Source::Cli, config: cli_set_config.clone() }];
 
     loop {
-        let candidate = current_dir.join(CONFIG_FILE_NAME);
-        match fs::read_to_string(&candidate) {
-            Ok(contents) => {
-                let config = toml::from_str(&contents)
-                    .with_context(|| format!("Unable to read file {:?} as a valid config file", candidate))?;
-                levels.push(Level { source: Source::File(candidate), config });
-            }
-            Err(e) if e.kind() == ErrorKind::NotFound => {}
-            Err(e) => eprintln!("Unable to read file {:?}, skipping: {e}", candidate),
-        }
-        if !current_dir.pop() {
+        levels.extend(read_level(cwd.join(CONFIG_FILE_NAME), Source::File)?);
+        if !cwd.pop() {
             break;
         }
+    }
+    if let Some(path) = user {
+        levels.extend(read_level(path, Source::User)?);
+    }
+    if let Some(path) = system {
+        levels.extend(read_level(path, Source::System)?);
     }
 
     Ok(levels)
@@ -245,10 +325,7 @@ pub fn merge_levels(mut levels: Vec<Level>) -> Result<Resolution> {
     let inline: Vec<(String, ColorScheme, PathBuf)> = levels
         .iter_mut()
         .flat_map(|level| {
-            let path = match &level.source {
-                Source::File(path) => path.clone(),
-                Source::Cli => PathBuf::from("<cli>"),
-            };
+            let path = level.source.path().map_or_else(|| PathBuf::from("<cli>"), Path::to_path_buf);
             level
                 .config
                 .color_schemes
@@ -261,7 +338,8 @@ pub fn merge_levels(mut levels: Vec<Level>) -> Result<Resolution> {
 
     let mut merged: Option<SetConfig> = None;
     let mut selected: Option<(String, SchemeOrigin)> = None;
-    for Level { config: mut level, .. } in levels {
+    let mut chains = TextChains::default();
+    for Level { source, config: mut level } in levels {
         if selected.is_none()
             && let Some(name) = level.scheme.clone()
         {
@@ -269,17 +347,181 @@ pub fn merge_levels(mut levels: Vec<Level>) -> Result<Resolution> {
             level.merge(scheme.into_set_config(), false);
             selected = Some((name, origin));
         }
+        for (chain, text) in [(&mut chains.tabname, &level.tabname), (&mut chains.badgetext, &level.badgetext)] {
+            if let Some(text) = text {
+                chain.0.push((source.clone(), text.clone()));
+            }
+        }
         match merged.as_mut() {
             Some(m) => m.merge(level, false),
             None => merged = Some(level),
         }
     }
 
-    Ok(Resolution { config: merged.unwrap_or_default(), scheme: selected })
+    Ok(Resolution { config: merged.unwrap_or_default(), scheme: selected, chains })
 }
 
-/// Merge the CLI/env config with every `.term-boss.toml` from the current directory up to `/`.
-/// See `load_levels` and `merge_levels`.
-pub fn read_hierarchial_config(cli_set_config: &SetConfig) -> Result<SetConfig> {
-    Ok(merge_levels(load_levels(cli_set_config)?)?.config)
+/// Merge the CLI/env config with every `.term-boss.toml` from the current directory up to `/`,
+/// then the user and host-wide base configs. See `load_levels` and `merge_levels`.
+pub fn read_hierarchial_config(cli_set_config: &SetConfig) -> Result<Resolution> {
+    merge_levels(load_levels(cli_set_config)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A fresh scratch directory per test, removed on drop.
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new(name: &str) -> Self {
+            let dir = env::temp_dir().join(format!("term-boss-test-{}-{name}", std::process::id()));
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(&dir).unwrap();
+            Scratch(dir)
+        }
+
+        fn write(&self, rel: &str, contents: &str) -> PathBuf {
+            let path = self.0.join(rel);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, contents).unwrap();
+            path
+        }
+
+        fn path(&self, rel: &str) -> PathBuf {
+            self.0.join(rel)
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn sources(levels: &[Level]) -> Vec<&Source> {
+        levels.iter().map(|l| &l.source).collect()
+    }
+
+    #[test]
+    fn base_configs_come_after_the_walk_in_order() {
+        let t = Scratch::new("order");
+        let project = t.write("proj/sub/.term-boss.toml", "tabname = \"sub\"\n");
+        let user = t.write("xdg/term-boss/user-base-config.toml", "tabname = \"user\"\n");
+        let system = t.write("etc/hostwide-base-config.toml", "tabname = \"host\"\n");
+
+        let levels =
+            load_levels_from(&SetConfig::default(), t.path("proj/sub"), Some(user.clone()), Some(system.clone())).unwrap();
+
+        let got = sources(&levels);
+        assert_eq!(got[0], &Source::Cli);
+        assert_eq!(got[1], &Source::File(project));
+        // Anything the walk finds above the scratch dir sits between; the base configs are last.
+        assert_eq!(got[got.len() - 2], &Source::User(user));
+        assert_eq!(got[got.len() - 1], &Source::System(system));
+    }
+
+    #[test]
+    fn missing_base_configs_are_skipped() {
+        let t = Scratch::new("missing");
+        let levels = load_levels_from(
+            &SetConfig::default(),
+            t.path("nowhere"),
+            Some(t.path("xdg/term-boss/user-base-config.toml")),
+            Some(t.path("etc/hostwide-base-config.toml")),
+        )
+        .unwrap();
+        assert!(levels.iter().all(|l| !matches!(l.source, Source::User(_) | Source::System(_))));
+
+        let levels = load_levels_from(&SetConfig::default(), t.path("nowhere"), None, None).unwrap();
+        assert!(levels.iter().all(|l| !matches!(l.source, Source::User(_) | Source::System(_))));
+    }
+
+    #[test]
+    fn nearer_levels_win_and_reset_propagates_up_from_system() {
+        let t = Scratch::new("precedence");
+        t.write("proj/.term-boss.toml", "tabname = \"proj\"\n");
+        let user = t.write("xdg/user-base-config.toml", "tabname = \"user\"\nbadgetext = \"u\"\n");
+        let system =
+            t.write("etc/hostwide-base-config.toml", "tabname = \"host\"\nbadgetext = \"h\"\ncursorcolor = \"red\"\nreset = true\n");
+
+        let levels = load_levels_from(&SetConfig::default(), t.path("proj"), Some(user), Some(system)).unwrap();
+        let resolved = merge_levels(levels).unwrap().config;
+
+        assert_eq!(resolved.tabname.as_deref(), Some("proj"));
+        assert_eq!(resolved.badgetext.as_deref(), Some("u"));
+        assert_eq!(resolved.cursorcolor.map(|c| format!("{c:x}")), Some("ff0000".to_string()));
+        assert!(resolved.reset);
+    }
+
+    #[test]
+    fn user_beats_system() {
+        let t = Scratch::new("user-over-system");
+        let user = t.write("xdg/user-base-config.toml", "tabname = \"user\"\n");
+        let system = t.write("etc/hostwide-base-config.toml", "tabname = \"host\"\n");
+        let levels = load_levels_from(&SetConfig::default(), t.path("empty"), Some(user), Some(system)).unwrap();
+        assert_eq!(merge_levels(levels).unwrap().config.tabname.as_deref(), Some("user"));
+    }
+
+    #[test]
+    fn inline_scheme_from_system_config_is_selectable_in_a_project() {
+        let t = Scratch::new("system-scheme");
+        t.write("proj/.term-boss.toml", "scheme = \"shared\"\n");
+        let system = t.write(
+            "etc/hostwide-base-config.toml",
+            "[color_schemes.shared.colors.primary]\nbackground = \"#010203\"\nforeground = \"#040506\"\n",
+        );
+        let levels = load_levels_from(&SetConfig::default(), t.path("proj"), None, Some(system.clone())).unwrap();
+        let resolution = merge_levels(levels).unwrap();
+        match resolution.scheme {
+            Some((name, SchemeOrigin::Inline(path))) => {
+                assert_eq!(name, "shared");
+                assert_eq!(path, system);
+            }
+            other => panic!("unexpected scheme origin: {other:?}"),
+        }
+        assert_eq!(resolution.config.bgcolor.map(|c| format!("{c:x}")), Some("010203".to_string()));
+    }
+
+    #[test]
+    fn text_chains_are_nearest_first_and_skip_levels_without_the_field() {
+        let t = Scratch::new("chains");
+        let project = t.write("proj/.term-boss.toml", "badgetext = \"p\"\n");
+        let user = t.write("xdg/user-base-config.toml", "tabname = \"only tab\"\n");
+        let system = t.write("etc/hostwide-base-config.toml", "badgetext = \"h\"\ntabname = \"ht\"\n");
+        let cli = SetConfig { badgetext: Some("c".into()), ..Default::default() };
+
+        let levels = load_levels_from(&cli, t.path("proj"), Some(user.clone()), Some(system.clone())).unwrap();
+        let chains = merge_levels(levels).unwrap().chains;
+
+        let badge: Vec<(&Source, &str)> = chains.badgetext.0.iter().map(|(s, t)| (s, t.as_str())).collect();
+        assert_eq!(badge[0], (&Source::Cli, "c"));
+        assert_eq!(badge[1], (&Source::File(project), "p"));
+        assert_eq!(badge[badge.len() - 1], (&Source::System(system.clone()), "h"));
+        assert!(!badge.iter().any(|(s, _)| matches!(s, Source::User(_))));
+        assert_eq!(chains.tabname.texts(), vec!["only tab", "ht"]);
+    }
+
+    #[test]
+    fn parent_chains_through_project_user_and_system() {
+        use crate::{expand, terminal_app::TerminalApp};
+        let t = Scratch::new("parent-e2e");
+        t.write("dev/.term-boss.toml", "badgetext = \"doing development as ${parent}\"\n");
+        let user = t.write("xdg/user-base-config.toml", "badgetext = \"someuser on ${parent}\"\n");
+        let system = t.write("etc/hostwide-base-config.toml", "badgetext = \"somehost\"\n");
+
+        let levels = load_levels_from(&SetConfig::default(), t.path("dev"), Some(user), Some(system)).unwrap();
+        let Resolution { mut config, chains, .. } = merge_levels(levels).unwrap();
+        expand::expand_config(&mut config, &chains, &expand::Context { terminal: TerminalApp::Generic });
+        assert_eq!(config.badgetext.as_deref(), Some("doing development as someuser on somehost"));
+    }
+
+    #[test]
+    fn malformed_system_config_is_an_error_naming_the_file() {
+        let t = Scratch::new("malformed");
+        let system = t.write("etc/hostwide-base-config.toml", "tabname = [\n");
+        let err = load_levels_from(&SetConfig::default(), t.path("empty"), None, Some(system.clone())).unwrap_err();
+        assert!(format!("{err:#}").contains(&format!("{system:?}")), "{err:#}");
+    }
 }

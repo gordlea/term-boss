@@ -16,8 +16,8 @@ fn wezterm_config_dir() -> Result<PathBuf> {
     if let Some(dir) = env::var_os("WEZTERM_CONFIG_DIR") {
         return Ok(PathBuf::from(dir));
     }
-    if let Some(xdg) = env::var_os("XDG_CONFIG_HOME") {
-        return Ok(PathBuf::from(xdg).join("wezterm"));
+    if let Some(xdg) = crate::scheme::xdg_config_home() {
+        return Ok(xdg.join("wezterm"));
     }
     let home = env::var_os("HOME").context("neither WEZTERM_CONFIG_DIR, XDG_CONFIG_HOME nor HOME is set")?;
     Ok(PathBuf::from(home).join(".config").join("wezterm"))

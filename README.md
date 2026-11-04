@@ -193,6 +193,7 @@ and `TTY` are shell parameters, not exported variables, which is why the built-i
 | `${git_branch}` | current branch, a short hash when detached, unset outside a repository |
 | `${repo}` | name of the directory containing `.git` |
 | `${terminal}` | the detected terminal: `Iterm2`, `Wezterm`, `Konsole`, `Alacritty`, `Vscode`, `Ghostty` or `Generic` |
+| `${parent}` | the same field from the next config above that sets it, already expanded; lets a nearer config extend a value instead of replacing it (see below) |
 
 `${X}` expands to the value, or nothing if unset. `${X:-fallback}` uses the fallback when `X`
 is unset or empty; `${X:+text}` uses the text only when `X` is set. Both may contain further
@@ -212,12 +213,48 @@ badgetext = "${username}@${host} ${AWS_PROFILE:-no aws profile}"
 On iTerm2 the badge text also supports iTerm's own variables when single-quoted, for example
 `--badgetext '\(hostname)'`. See <https://iterm2.com/documentation-variables.html>.
 
+### Extending a parent's text
+
+Normally the nearest config's `tabname` or `badgetext` replaces the farther ones. `${parent}`
+splices in the farther value instead, so each level can add to what is above it:
+
+```toml
+# /etc/term-boss/hostwide-base-config.toml
+badgetext = "somehost"
+
+# ~/.config/term-boss/user-base-config.toml
+badgetext = "someuser on ${parent}"
+
+# ~/dev/.term-boss.toml
+badgetext = "doing development as ${parent}"
+```
+
+In `~/dev` the badge reads `doing development as someuser on somehost`. The parent value is
+expanded first (its own `${host}` or `${parent}` resolve against *its* level) and then inserted
+as plain text. Levels that do not set the field are skipped. At the top of the chain `${parent}`
+is unset, so `${parent:-fallback}` and `${parent:+ · ${parent}}` work as for any variable. The
+CLI and `TERM_BOSS_*` variables are the nearest level, so `--badgetext 'ci › ${parent}'` extends
+the directory's badge. `term-boss show` prints the chain under "Resolved".
+
 ## Config files
 
 `term-boss set` looks for `.term-boss.toml` in the current directory and every parent up
 to `/`. Every key accepts the same values as the matching CLI flag.
 Runnable examples of every use case live in [`examples/`](examples). `term-boss show` prints
 which file each value came from.
+
+Two base configs sit beneath every directory, so they apply wherever you `cd`, including
+`/tmp` and other users' trees:
+
+- `$XDG_CONFIG_HOME/term-boss/user-base-config.toml` (default
+  `~/.config/term-boss/user-base-config.toml`) for your own defaults. An empty or relative
+  `XDG_CONFIG_HOME` is ignored, as the XDG spec requires.
+- `/etc/term-boss/hostwide-base-config.toml` for every user on the host.
+
+They use the same keys as `.term-boss.toml`. Typical uses: `reset = true` so leaving a themed
+project always restores the terminal, a `[color_schemes.<name>]` block every project can
+select, or a `tabname = "${host}"` default on a server. Any project file overrides them field
+by field.
 
 ```toml
 tabname = "api"
@@ -236,8 +273,12 @@ Nearer definitions win, field by field:
 1. CLI flags and environment variables
 2. `.term-boss.toml` in the current directory
 3. `.term-boss.toml` in each parent directory, nearest first
+4. `$XDG_CONFIG_HOME/term-boss/user-base-config.toml` (default
+   `~/.config/term-boss/user-base-config.toml`)
+5. `/etc/term-boss/hostwide-base-config.toml`
 
-So a repo-level config can set a tab colour while a subdirectory overrides only the tab name.
+So a repo-level config can set a tab colour while a subdirectory overrides only the tab name,
+and the base configs fill in whatever no project file sets.
 
 Unknown keys are an error, so typos fail loudly with the file, line and column.
 
@@ -355,13 +396,15 @@ and is skipped. Misspelt keys inside a section term-boss reads are an error.
 
 With `reset = true` (or `--reset`), anything not set after resolution is returned to the
 terminal's default: tab colour and name, badge, pane colours (OSC 110/111/112) and any
-palette slots the scheme did not cover (OSC 104). Put it in a config near the top of your
-tree so leaving a themed project clears its colours.
+palette slots the scheme did not cover (OSC 104). Put it in
+`~/.config/term-boss/user-base-config.toml` so leaving a themed project clears its colours
+from any directory; `reset` from a farther level is never overridden by a nearer one.
 
 ## Security notes
 
 `.term-boss.toml` files are read from every directory you `cd` into, including cloned
-repositories, so they are treated as untrusted:
+repositories, so they are treated as untrusted. The user and host-wide base configs are the
+operator's own files but go through exactly the same parsing and validation:
 
 - `term-boss set` never touches the network. Schemes come only from local files, and the
   library is fetched solely by the explicit `setup colorschemes` command, from a fixed URL over
