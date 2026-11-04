@@ -29,7 +29,7 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Apply tab/pane settings from CLI flags, env vars and .term-boss.toml files
+    /// Apply tab/pane settings from CLI flags, env vars, .term-boss.toml files and the user/host-wide base configs
     Set(SetConfig),
     /// Explain what `set` would apply here and why, without changing the terminal
     Show(SetConfig),

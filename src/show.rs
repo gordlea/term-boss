@@ -94,25 +94,39 @@ pub fn run(cli: &SetConfig, stdout: &mut Stdout) -> Result<()> {
     let levels = config::load_levels(cli)?;
 
     writeln!(stdout, "\nConfig files (nearest first):")?;
-    let files: Vec<&PathBuf> = levels
+    let walk: Vec<&PathBuf> = levels
         .iter()
         .filter_map(|level| match &level.source {
             Source::File(path) => Some(path),
-            Source::Cli => None,
+            _ => None,
         })
         .collect();
-    if files.is_empty() {
+    if walk.is_empty() {
         let cwd = env::current_dir().map(|d| d.display().to_string()).unwrap_or_default();
         writeln!(stdout, "  none found between {cwd} and /")?;
     }
-    for path in files {
+    for path in walk {
         writeln!(stdout, "  {}", path.display())?;
+    }
+    let found = |wanted: fn(&Source) -> bool| levels.iter().any(|level| wanted(&level.source));
+    match config::user_config_path() {
+        Some(path) if found(|s| matches!(s, Source::User(_))) => writeln!(stdout, "  {} (user)", path.display())?,
+        Some(path) => writeln!(stdout, "  {} (user, not found)", path.display())?,
+        None => writeln!(stdout, "  user base config: skipped (neither XDG_CONFIG_HOME nor HOME is set)")?,
+    }
+    let system = config::system_config_path();
+    if found(|s| matches!(s, Source::System(_))) {
+        writeln!(stdout, "  {} (host-wide)", system.display())?;
+    } else {
+        writeln!(stdout, "  {} (host-wide, not found)", system.display())?;
     }
 
     for level in &levels {
         match &level.source {
             Source::Cli => writeln!(stdout, "\nCLI / env:")?,
             Source::File(path) => writeln!(stdout, "\n{}:", path.display())?,
+            Source::User(path) => writeln!(stdout, "\n{} (user base config):", path.display())?,
+            Source::System(path) => writeln!(stdout, "\n{} (host-wide base config):", path.display())?,
         }
         let lines = describe(&level.config, false);
         if lines.is_empty() {

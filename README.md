@@ -219,6 +219,18 @@ to `/`. Every key accepts the same values as the matching CLI flag.
 Runnable examples of every use case live in [`examples/`](examples). `term-boss show` prints
 which file each value came from.
 
+Two base configs sit beneath every directory, so they apply wherever you `cd`, including
+`/tmp` and other users' trees:
+
+- `$XDG_CONFIG_HOME/term-boss/user-base-config.toml` (default
+  `~/.config/term-boss/user-base-config.toml`) for your own defaults.
+- `/etc/term-boss/hostwide-base-config.toml` for every user on the host.
+
+They use the same keys as `.term-boss.toml`. Typical uses: `reset = true` so leaving a themed
+project always restores the terminal, a `[color_schemes.<name>]` block every project can
+select, or a `tabname = "${host}"` default on a server. Any project file overrides them field
+by field.
+
 ```toml
 tabname = "api"
 tabcolor = "#2b6cb0"
@@ -236,8 +248,12 @@ Nearer definitions win, field by field:
 1. CLI flags and environment variables
 2. `.term-boss.toml` in the current directory
 3. `.term-boss.toml` in each parent directory, nearest first
+4. `$XDG_CONFIG_HOME/term-boss/user-base-config.toml` (default
+   `~/.config/term-boss/user-base-config.toml`)
+5. `/etc/term-boss/hostwide-base-config.toml`
 
-So a repo-level config can set a tab colour while a subdirectory overrides only the tab name.
+So a repo-level config can set a tab colour while a subdirectory overrides only the tab name,
+and the base configs fill in whatever no project file sets.
 
 Unknown keys are an error, so typos fail loudly with the file, line and column.
 
@@ -355,13 +371,15 @@ and is skipped. Misspelt keys inside a section term-boss reads are an error.
 
 With `reset = true` (or `--reset`), anything not set after resolution is returned to the
 terminal's default: tab colour and name, badge, pane colours (OSC 110/111/112) and any
-palette slots the scheme did not cover (OSC 104). Put it in a config near the top of your
-tree so leaving a themed project clears its colours.
+palette slots the scheme did not cover (OSC 104). Put it in
+`~/.config/term-boss/user-base-config.toml` so leaving a themed project clears its colours
+from any directory; `reset` from a farther level is never overridden by a nearer one.
 
 ## Security notes
 
 `.term-boss.toml` files are read from every directory you `cd` into, including cloned
-repositories, so they are treated as untrusted:
+repositories, so they are treated as untrusted. The user and host-wide base configs are the
+operator's own files but go through exactly the same parsing and validation:
 
 - `term-boss set` never touches the network. Schemes come only from local files, and the
   library is fetched solely by the explicit `setup colorschemes` command, from a fixed URL over
