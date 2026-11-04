@@ -31,13 +31,14 @@ pub type Palette = BTreeMap<TermColorMapping, ColorSpec>;
 pub struct SetConfig {
     /// Tab (or window) title. `${host}`, `${git_branch}`, `${repo}` and other built-ins, or
     /// `${VAR}` for an environment variable; `${VAR:-fallback}`, `${VAR:+text}`; `$${` is a
-    /// literal `${`.
+    /// literal `${`. `${parent}` is this field's value from the next config above.
     #[arg(long, env = "TERM_BOSS_NAME")]
     pub tabname: Option<String>,
 
     /// Badge text. Works with emojis. Expands built-ins such as `${host}` and `${git_branch}`
     /// and `${VAR}` environment variables (except names that look like secrets);
-    /// `${VAR:-fallback}`, `${VAR:+text}`; `$${` is a literal `${`.
+    /// `${VAR:-fallback}`, `${VAR:+text}`; `$${` is a literal `${`. `${parent}` is this field's
+    /// value from the next config above.
     /// On iTerm2 the text may also use iTerm's own variables, e.g. `--badgetext '\(hostname)'`,
     /// see https://iterm2.com/documentation-variables.html. Terminals without a badge show it
     /// in the tab title as `name [badge]`.
@@ -191,12 +192,31 @@ pub enum SchemeOrigin {
     Dir(PathBuf),
 }
 
+/// Raw text of one field at every level that sets it, nearest first. `${parent}` walks it.
+#[derive(Debug, Default, Clone)]
+pub struct TextChain(pub Vec<(Source, String)>);
+
+impl TextChain {
+    pub fn texts(&self) -> Vec<&str> {
+        self.0.iter().map(|(_, text)| text.as_str()).collect()
+    }
+}
+
+/// The chains of every expanded text field.
+#[derive(Debug, Default, Clone)]
+pub struct TextChains {
+    pub tabname: TextChain,
+    pub badgetext: TextChain,
+}
+
 /// The outcome of merging all levels.
 #[derive(Debug)]
 pub struct Resolution {
     pub config: SetConfig,
     /// The scheme that was applied, if any, and where it came from.
     pub scheme: Option<(String, SchemeOrigin)>,
+    /// Per-level raw text of `tabname` and `badgetext`, for `${parent}`.
+    pub chains: TextChains,
 }
 
 /// The per-user base config path, `None` when neither `XDG_CONFIG_HOME` nor `HOME` is set.
@@ -318,7 +338,8 @@ pub fn merge_levels(mut levels: Vec<Level>) -> Result<Resolution> {
 
     let mut merged: Option<SetConfig> = None;
     let mut selected: Option<(String, SchemeOrigin)> = None;
-    for Level { config: mut level, .. } in levels {
+    let mut chains = TextChains::default();
+    for Level { source, config: mut level } in levels {
         if selected.is_none()
             && let Some(name) = level.scheme.clone()
         {
@@ -326,19 +347,24 @@ pub fn merge_levels(mut levels: Vec<Level>) -> Result<Resolution> {
             level.merge(scheme.into_set_config(), false);
             selected = Some((name, origin));
         }
+        for (chain, text) in [(&mut chains.tabname, &level.tabname), (&mut chains.badgetext, &level.badgetext)] {
+            if let Some(text) = text {
+                chain.0.push((source.clone(), text.clone()));
+            }
+        }
         match merged.as_mut() {
             Some(m) => m.merge(level, false),
             None => merged = Some(level),
         }
     }
 
-    Ok(Resolution { config: merged.unwrap_or_default(), scheme: selected })
+    Ok(Resolution { config: merged.unwrap_or_default(), scheme: selected, chains })
 }
 
 /// Merge the CLI/env config with every `.term-boss.toml` from the current directory up to `/`,
 /// then the user and host-wide base configs. See `load_levels` and `merge_levels`.
-pub fn read_hierarchial_config(cli_set_config: &SetConfig) -> Result<SetConfig> {
-    Ok(merge_levels(load_levels(cli_set_config)?)?.config)
+pub fn read_hierarchial_config(cli_set_config: &SetConfig) -> Result<Resolution> {
+    merge_levels(load_levels(cli_set_config)?)
 }
 
 #[cfg(test)]
@@ -456,6 +482,39 @@ mod tests {
             other => panic!("unexpected scheme origin: {other:?}"),
         }
         assert_eq!(resolution.config.bgcolor.map(|c| format!("{c:x}")), Some("010203".to_string()));
+    }
+
+    #[test]
+    fn text_chains_are_nearest_first_and_skip_levels_without_the_field() {
+        let t = Scratch::new("chains");
+        let project = t.write("proj/.term-boss.toml", "badgetext = \"p\"\n");
+        let user = t.write("xdg/user-base-config.toml", "tabname = \"only tab\"\n");
+        let system = t.write("etc/hostwide-base-config.toml", "badgetext = \"h\"\ntabname = \"ht\"\n");
+        let cli = SetConfig { badgetext: Some("c".into()), ..Default::default() };
+
+        let levels = load_levels_from(&cli, t.path("proj"), Some(user.clone()), Some(system.clone())).unwrap();
+        let chains = merge_levels(levels).unwrap().chains;
+
+        let badge: Vec<(&Source, &str)> = chains.badgetext.0.iter().map(|(s, t)| (s, t.as_str())).collect();
+        assert_eq!(badge[0], (&Source::Cli, "c"));
+        assert_eq!(badge[1], (&Source::File(project), "p"));
+        assert_eq!(badge[badge.len() - 1], (&Source::System(system.clone()), "h"));
+        assert!(!badge.iter().any(|(s, _)| matches!(s, Source::User(_))));
+        assert_eq!(chains.tabname.texts(), vec!["only tab", "ht"]);
+    }
+
+    #[test]
+    fn parent_chains_through_project_user_and_system() {
+        use crate::{expand, terminal_app::TerminalApp};
+        let t = Scratch::new("parent-e2e");
+        t.write("dev/.term-boss.toml", "badgetext = \"doing development as ${parent}\"\n");
+        let user = t.write("xdg/user-base-config.toml", "badgetext = \"someuser on ${parent}\"\n");
+        let system = t.write("etc/hostwide-base-config.toml", "badgetext = \"somehost\"\n");
+
+        let levels = load_levels_from(&SetConfig::default(), t.path("dev"), Some(user), Some(system)).unwrap();
+        let Resolution { mut config, chains, .. } = merge_levels(levels).unwrap();
+        expand::expand_config(&mut config, &chains, &expand::Context { terminal: TerminalApp::Generic });
+        assert_eq!(config.badgetext.as_deref(), Some("doing development as someuser on somehost"));
     }
 
     #[test]

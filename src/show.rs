@@ -122,12 +122,7 @@ pub fn run(cli: &SetConfig, stdout: &mut Stdout) -> Result<()> {
     }
 
     for level in &levels {
-        match &level.source {
-            Source::Cli => writeln!(stdout, "\nCLI / env:")?,
-            Source::File(path) => writeln!(stdout, "\n{}:", path.display())?,
-            Source::User(path) => writeln!(stdout, "\n{} (user base config):", path.display())?,
-            Source::System(path) => writeln!(stdout, "\n{} (host-wide base config):", path.display())?,
-        }
+        writeln!(stdout, "\n{}:", label(&level.source))?;
         let lines = describe(&level.config, false);
         if lines.is_empty() {
             writeln!(stdout, "  (no keys)")?;
@@ -162,26 +157,43 @@ pub fn run(cli: &SetConfig, stdout: &mut Stdout) -> Result<()> {
             None => writeln!(stdout, "  ${{{name}}} = (unset)")?,
         }
     }
+    writeln!(stdout, "  ${{parent}} = the same field from the next config above (see Resolved)")?;
 
     let raw = &resolution.config;
     let mut expanded = raw.clone();
-    expand::expand_config(&mut expanded, &ctx);
+    expand::expand_config(&mut expanded, &resolution.chains, &ctx);
 
     writeln!(stdout, "\nResolved:")?;
     for line in describe(raw, true) {
         writeln!(stdout, "  {line}")?;
     }
-    for (key, before, after) in [
-        ("tabname", &raw.tabname, &expanded.tabname),
-        ("badgetext", &raw.badgetext, &expanded.badgetext),
+    for (key, before, after, chain) in [
+        ("tabname", &raw.tabname, &expanded.tabname, &resolution.chains.tabname),
+        ("badgetext", &raw.badgetext, &expanded.badgetext, &resolution.chains.badgetext),
     ] {
+        let parent_ref = format!("${{{}", expand::PARENT);
+        if before.as_deref().is_some_and(|t| t.contains(&parent_ref)) {
+            // Each link is shown up to the first one that does not itself refer to its parent.
+            for (source, text) in chain.0.iter().skip(1) {
+                writeln!(stdout, "  {key} ${{parent}} <- {text:?} ({})", label(source))?;
+                if !text.contains(&parent_ref) {
+                    break;
+                }
+            }
+        }
         if before != after
             && let Some(after) = after
         {
             writeln!(stdout, "  {key} expands to {after:?}")?;
         }
-        for name in before.as_deref().map(|t| expand::blocked_vars(t, &ctx)).unwrap_or_default() {
-            writeln!(stdout, "  note: ${{{name}}} in {key} is not expanded (looks like a secret)")?;
+        let mut reported: Vec<String> = Vec::new();
+        for (_, text) in &chain.0 {
+            for name in expand::blocked_vars(text, &ctx) {
+                if !reported.contains(&name) {
+                    writeln!(stdout, "  note: ${{{name}}} in {key} is not expanded (looks like a secret)")?;
+                    reported.push(name);
+                }
+            }
         }
     }
     let (tabname, badgetext) = (expanded.tabname.as_deref(), expanded.badgetext.as_deref());
@@ -190,6 +202,16 @@ pub fn run(cli: &SetConfig, stdout: &mut Stdout) -> Result<()> {
         writeln!(stdout, "  note: {terminal:?} has no badge, so the tab title becomes {title:?}")?;
     }
     Ok(())
+}
+
+/// How a level is named in the output.
+fn label(source: &Source) -> String {
+    match source {
+        Source::Cli => "CLI / env".to_string(),
+        Source::File(path) => path.display().to_string(),
+        Source::User(path) => format!("{} (user base config)", path.display()),
+        Source::System(path) => format!("{} (host-wide base config)", path.display()),
+    }
 }
 
 /// One line per field. With `include_unset`, every field is listed; otherwise only set ones.

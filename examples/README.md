@@ -26,6 +26,7 @@ TERM_PROGRAM=iTerm.app term-boss set | cat -v
 | [`scheme-precedence/`](scheme-precedence) | Nearest scheme wins outright; explicit keys override scheme values |
 | [`home-reset/`](home-reset) | A user base config (`~/.config/term-boss/user-base-config.toml`) that restores defaults when you leave a themed project |
 | [`env-vars/`](env-vars) | `${VAR}` and `${VAR:-fallback}` in tab names and badge text |
+| [`parent-chain/`](parent-chain) | `${parent}`: a subdirectory extends the badge text of the config above it |
 
 Configs are resolved from the current directory up to `/`, then the user and host-wide base
 configs, so these examples are only affected by any `.term-boss.toml` you have in a parent of

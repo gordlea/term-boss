@@ -193,6 +193,7 @@ and `TTY` are shell parameters, not exported variables, which is why the built-i
 | `${git_branch}` | current branch, a short hash when detached, unset outside a repository |
 | `${repo}` | name of the directory containing `.git` |
 | `${terminal}` | the detected terminal: `Iterm2`, `Wezterm`, `Konsole`, `Alacritty`, `Vscode`, `Ghostty` or `Generic` |
+| `${parent}` | the same field from the next config above that sets it, already expanded; lets a nearer config extend a value instead of replacing it (see below) |
 
 `${X}` expands to the value, or nothing if unset. `${X:-fallback}` uses the fallback when `X`
 is unset or empty; `${X:+text}` uses the text only when `X` is set. Both may contain further
@@ -211,6 +212,29 @@ badgetext = "${username}@${host} ${AWS_PROFILE:-no aws profile}"
 
 On iTerm2 the badge text also supports iTerm's own variables when single-quoted, for example
 `--badgetext '\(hostname)'`. See <https://iterm2.com/documentation-variables.html>.
+
+### Extending a parent's text
+
+Normally the nearest config's `tabname` or `badgetext` replaces the farther ones. `${parent}`
+splices in the farther value instead, so each level can add to what is above it:
+
+```toml
+# /etc/term-boss/hostwide-base-config.toml
+badgetext = "somehost"
+
+# ~/.config/term-boss/user-base-config.toml
+badgetext = "someuser on ${parent}"
+
+# ~/dev/.term-boss.toml
+badgetext = "doing development as ${parent}"
+```
+
+In `~/dev` the badge reads `doing development as someuser on somehost`. The parent value is
+expanded first (its own `${host}` or `${parent}` resolve against *its* level) and then inserted
+as plain text. Levels that do not set the field are skipped. At the top of the chain `${parent}`
+is unset, so `${parent:-fallback}` and `${parent:+ · ${parent}}` work as for any variable. The
+CLI and `TERM_BOSS_*` variables are the nearest level, so `--badgetext 'ci › ${parent}'` extends
+the directory's badge. `term-boss show` prints the chain under "Resolved".
 
 ## Config files
 

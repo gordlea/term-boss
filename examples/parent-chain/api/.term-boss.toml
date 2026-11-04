@@ -1,0 +1,3 @@
+# ${parent} is the badge text from the next config above that sets one, already expanded, so
+# this level adds to it instead of replacing it. tabname is not set here, so it is inherited.
+badgetext = "api · ${parent}"

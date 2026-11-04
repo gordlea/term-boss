@@ -7,6 +7,9 @@
 //! - `${NAME:+text}` uses `text` only when the variable is set and non-empty.
 //! - Fallback and alternate text may themselves contain references, to a small depth.
 //! - Expanded *values* are never scanned again: `${X}` inside a variable's value stays literal.
+//! - `${parent}` is the same field's value from the next farther config level that sets it,
+//!   already expanded (so its own `${parent}` resolves against *its* parent). Levels that do not
+//!   set the field are skipped; at the top of the chain it is unset. See [`expand_chain`].
 //! - `$` is special only when immediately followed by `{`, so `$5`, `$$$` and `$USER` are left
 //!   alone. `$${` produces a literal `${`, so `$${NAME}` stays `${NAME}`.
 //! - Anything malformed (`${`, `${1x}`, `${a b}`, an unterminated brace) is left as is. A typo in
@@ -25,7 +28,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{config::SetConfig, terminal_app::TerminalApp};
+use crate::{
+    config::{SetConfig, TextChains},
+    terminal_app::TerminalApp,
+};
 
 /// What expansion needs to know about the current invocation.
 pub struct Context {
@@ -41,24 +47,46 @@ pub const BUILTIN_NAMES: [&str; 10] =
 /// only bounds pathological literal text.
 const MAX_DEPTH: usize = 4;
 
-/// Expand `${…}` references in `tabname` and `badgetext`. A value that expands to nothing
-/// (e.g. `badgetext = "${AWS_PROFILE}"` with no profile) is treated as unset, so the terminal
-/// does not show an empty badge or `name []`.
-pub fn expand_config(config: &mut SetConfig, ctx: &Context) {
-    for field in [&mut config.tabname, &mut config.badgetext] {
-        if let Some(text) = field.as_deref()
-            && text.contains("${")
-        {
-            let expanded = expand(text, ctx);
+/// Expand `${…}` references in `tabname` and `badgetext`, each through its chain of per-level
+/// values so `${parent}` resolves. A value that expands to nothing (e.g.
+/// `badgetext = "${AWS_PROFILE}"` with no profile) is treated as unset, so the terminal does not
+/// show an empty badge or `name []`. A field with an empty chain is expanded on its own.
+pub fn expand_config(config: &mut SetConfig, chains: &TextChains, ctx: &Context) {
+    for (field, chain) in [(&mut config.tabname, &chains.tabname), (&mut config.badgetext, &chains.badgetext)] {
+        let Some(text) = field.as_deref() else { continue };
+        let mut texts = chain.texts();
+        if texts.is_empty() {
+            texts.push(text);
+        }
+        if texts.iter().any(|t| t.contains("${")) {
+            let expanded = expand_chain(&texts, ctx);
             *field = if expanded.is_empty() { None } else { Some(expanded) };
         }
     }
 }
 
-/// Expand `${…}` references in one string.
+/// Expand `${…}` references in one string; `${parent}` is unset.
+#[cfg(test)]
 pub fn expand(text: &str, ctx: &Context) -> String {
-    render(text, 0, &mut |name| lookup(name, ctx))
+    expand_chain(&[text], ctx)
 }
+
+/// Expand the first text of `chain`, with `${parent}` resolving to the rest of the chain expanded
+/// the same way. Farther levels are only expanded when referenced, and at most once each.
+pub fn expand_chain(chain: &[&str], ctx: &Context) -> String {
+    let Some((head, rest)) = chain.split_first() else { return String::new() };
+    let mut parent: Option<String> = None;
+    render(head, 0, &mut |name| {
+        if name == PARENT {
+            Some(parent.get_or_insert_with(|| expand_chain(rest, ctx)).clone())
+        } else {
+            lookup(name, ctx)
+        }
+    })
+}
+
+/// The chain variable: the same field from the next config above.
+pub const PARENT: &str = "parent";
 
 /// Environment variable names in `text` that were refused because they look like secrets.
 pub fn blocked_vars(text: &str, ctx: &Context) -> Vec<String> {
@@ -490,6 +518,54 @@ mod tests {
     }
 
     #[test]
+    fn parent_chain() {
+        let ctx = setup();
+        let chain = ["doing development as ${parent}", "someuser on ${parent}", "somehost"];
+        assert_eq!(expand_chain(&chain, &ctx), "doing development as someuser on somehost");
+        // Only the nearest level is used when it does not refer to its parent.
+        assert_eq!(expand_chain(&["mine", "theirs"], &ctx), "mine");
+        // Levels are expanded in their own right.
+        assert_eq!(expand_chain(&["[${parent}]", "${TERM_BOSS_TEST_SET}"], &ctx), "[val]");
+        // Twice gives the value twice; inside a modifier body it resolves too.
+        assert_eq!(expand_chain(&["${parent}/${parent}", "x"], &ctx), "x/x");
+        assert_eq!(expand_chain(&["${TERM_BOSS_TEST_UNSET:-${parent}}", "fb"], &ctx), "fb");
+    }
+
+    #[test]
+    fn parent_at_top_of_chain_is_unset() {
+        let ctx = setup();
+        assert_eq!(expand_chain(&["a ${parent} b"], &ctx), "a  b");
+        assert_eq!(expand_chain(&["${parent:-none}"], &ctx), "none");
+        assert_eq!(expand_chain(&["${parent:+ on ${parent}}"], &ctx), "");
+        assert_eq!(expand_chain(&["host${parent:+ on ${parent}}", "x"], &ctx), "host on x");
+        assert_eq!(expand_chain(&[], &ctx), "");
+        assert_eq!(x("${parent:-solo}"), "solo");
+    }
+
+    #[test]
+    fn parent_value_is_not_re_expanded() {
+        let ctx = setup();
+        // The parent expands to literal `${TERM_BOSS_TEST_SET}`, which the child must not scan.
+        assert_eq!(expand_chain(&["<${parent}>", "${TERM_BOSS_TEST_REF}"], &ctx), "<${TERM_BOSS_TEST_SET}>");
+        assert_eq!(expand_chain(&["<${parent}>", "$${parent}"], &ctx), "<${parent}>");
+    }
+
+    #[test]
+    fn expand_config_follows_chains() {
+        let ctx = setup();
+        let mut config = SetConfig { badgetext: Some("near ${parent}".into()), ..Default::default() };
+        let chains = TextChains {
+            badgetext: crate::config::TextChain(vec![
+                (crate::config::Source::Cli, "near ${parent}".into()),
+                (crate::config::Source::Cli, "far".into()),
+            ]),
+            ..Default::default()
+        };
+        expand_config(&mut config, &chains, &ctx);
+        assert_eq!(config.badgetext.as_deref(), Some("near far"));
+    }
+
+    #[test]
     fn expand_config_only_touches_text_fields() {
         let ctx = setup();
         let mut config = SetConfig {
@@ -498,7 +574,7 @@ mod tests {
             scheme: Some("${TERM_BOSS_TEST_SET}".into()),
             ..Default::default()
         };
-        expand_config(&mut config, &ctx);
+        expand_config(&mut config, &TextChains::default(), &ctx);
         assert_eq!(config.tabname.as_deref(), Some("val"));
         assert_eq!(config.badgetext.as_deref(), Some("plain"));
         assert_eq!(config.scheme.as_deref(), Some("${TERM_BOSS_TEST_SET}"));
@@ -512,7 +588,7 @@ mod tests {
             badgetext: Some(String::new()),
             ..Default::default()
         };
-        expand_config(&mut config, &ctx);
+        expand_config(&mut config, &TextChains::default(), &ctx);
         assert_eq!(config.tabname, None);
         // A literal empty string is left alone; only expansion results are checked.
         assert_eq!(config.badgetext.as_deref(), Some(""));

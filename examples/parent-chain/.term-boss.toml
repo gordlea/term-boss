@@ -1,0 +1,3 @@
+# The outer level sets a badge for the whole tree.
+badgetext = "team ${host}"
+tabname = "parent-chain"
