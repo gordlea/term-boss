@@ -171,29 +171,20 @@ pub fn run(cli: &SetConfig, stdout: &mut Stdout) -> Result<()> {
         ("tabname", &raw.tabname, &expanded.tabname, &resolution.chains.tabname),
         ("badgetext", &raw.badgetext, &expanded.badgetext, &resolution.chains.badgetext),
     ] {
-        let parent_ref = format!("${{{}", expand::PARENT);
-        if before.as_deref().is_some_and(|t| t.contains(&parent_ref)) {
-            // Each link is shown up to the first one that does not itself refer to its parent.
-            for (source, text) in chain.0.iter().skip(1) {
-                writeln!(stdout, "  {key} ${{parent}} <- {text:?} ({})", label(source))?;
-                if !text.contains(&parent_ref) {
-                    break;
-                }
-            }
+        // Mirror `expand_config`: nothing is expanded unless the nearest text has a reference.
+        let Some(text) = before.as_deref().filter(|t| t.contains("${")) else { continue };
+        let report = expand::expand_chain(&expand::chain_texts(chain, text), &ctx);
+        // Exactly the parent links expansion read, nearest first.
+        for (source, link) in chain.0.iter().take(report.links).skip(1) {
+            writeln!(stdout, "  {key} ${{parent}} <- {link:?} ({})", label(source))?;
         }
-        if before != after
-            && let Some(after) = after
+        if let Some(after) = after
+            && after != text
         {
             writeln!(stdout, "  {key} expands to {after:?}")?;
         }
-        let mut reported: Vec<String> = Vec::new();
-        for (_, text) in &chain.0 {
-            for name in expand::blocked_vars(text, &ctx) {
-                if !reported.contains(&name) {
-                    writeln!(stdout, "  note: ${{{name}}} in {key} is not expanded (looks like a secret)")?;
-                    reported.push(name);
-                }
-            }
+        for name in report.blocked {
+            writeln!(stdout, "  note: ${{{name}}} in {key} is not expanded (looks like a secret)")?;
         }
     }
     let (tabname, badgetext) = (expanded.tabname.as_deref(), expanded.badgetext.as_deref());

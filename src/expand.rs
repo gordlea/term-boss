@@ -10,6 +10,9 @@
 //! - `${parent}` is the same field's value from the next farther config level that sets it,
 //!   already expanded (so its own `${parent}` resolves against *its* parent). Levels that do not
 //!   set the field are skipped; at the top of the chain it is unset. See [`expand_chain`].
+//! - An expanded value is at most [`MAX_OUTPUT`] bytes; anything past that is dropped at a
+//!   character boundary. Titles are short, and the cap keeps a hostile tree whose every level
+//!   says `${parent}${parent}` from doubling without end.
 //! - `$` is special only when immediately followed by `{`, so `$5`, `$$$` and `$USER` are left
 //!   alone. `$${` produces a literal `${`, so `$${NAME}` stays `${NAME}`.
 //! - Anything malformed (`${`, `${1x}`, `${a b}`, an unterminated brace) is left as is. A typo in
@@ -29,7 +32,7 @@ use std::{
 };
 
 use crate::{
-    config::{SetConfig, TextChains},
+    config::{SetConfig, TextChain, TextChains},
     terminal_app::TerminalApp,
 };
 
@@ -47,58 +50,73 @@ pub const BUILTIN_NAMES: [&str; 10] =
 /// only bounds pathological literal text.
 const MAX_DEPTH: usize = 4;
 
+/// Upper bound on the bytes of one expanded value, including every parent value copied into it.
+pub const MAX_OUTPUT: usize = 4096;
+
 /// Expand `${…}` references in `tabname` and `badgetext`, each through its chain of per-level
-/// values so `${parent}` resolves. A value that expands to nothing (e.g.
+/// values so `${parent}` resolves. Only the nearest text decides whether anything is expanded,
+/// so a literal `""` override stays `""`. A value that expands to nothing (e.g.
 /// `badgetext = "${AWS_PROFILE}"` with no profile) is treated as unset, so the terminal does not
 /// show an empty badge or `name []`. A field with an empty chain is expanded on its own.
 pub fn expand_config(config: &mut SetConfig, chains: &TextChains, ctx: &Context) {
     for (field, chain) in [(&mut config.tabname, &chains.tabname), (&mut config.badgetext, &chains.badgetext)] {
         let Some(text) = field.as_deref() else { continue };
-        let mut texts = chain.texts();
-        if texts.is_empty() {
-            texts.push(text);
+        if !text.contains("${") {
+            continue;
         }
-        if texts.iter().any(|t| t.contains("${")) {
-            let expanded = expand_chain(&texts, ctx);
-            *field = if expanded.is_empty() { None } else { Some(expanded) };
-        }
+        let expanded = expand_chain(&chain_texts(chain, text), ctx).value;
+        *field = if expanded.is_empty() { None } else { Some(expanded) };
     }
+}
+
+/// The texts `${parent}` walks for a field whose nearest raw value is `text`: the chain, or just
+/// `text` when no chain was recorded.
+pub fn chain_texts<'a>(chain: &'a TextChain, text: &'a str) -> Vec<&'a str> {
+    let texts = chain.texts();
+    if texts.is_empty() { vec![text] } else { texts }
 }
 
 /// Expand `${…}` references in one string; `${parent}` is unset.
 #[cfg(test)]
 pub fn expand(text: &str, ctx: &Context) -> String {
-    expand_chain(&[text], ctx)
+    expand_chain(&[text], ctx).value
+}
+
+/// The result of expanding one field through its chain.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Expansion {
+    pub value: String,
+    /// Chain entries consulted, counting the nearest one: `chain[1..links]` are the parents used.
+    pub links: usize,
+    /// Environment names refused because they look like secrets, in the branches actually
+    /// rendered, in order of first appearance.
+    pub blocked: Vec<String>,
 }
 
 /// Expand the first text of `chain`, with `${parent}` resolving to the rest of the chain expanded
 /// the same way. Farther levels are only expanded when referenced, and at most once each.
-pub fn expand_chain(chain: &[&str], ctx: &Context) -> String {
-    let Some((head, rest)) = chain.split_first() else { return String::new() };
-    let mut parent: Option<String> = None;
-    render(head, 0, &mut |name| {
+pub fn expand_chain(chain: &[&str], ctx: &Context) -> Expansion {
+    let mut blocked = Vec::new();
+    let (value, links) = expand_into(chain, ctx, &mut blocked);
+    Expansion { value, links, blocked }
+}
+
+fn expand_into(chain: &[&str], ctx: &Context, blocked: &mut Vec<String>) -> (String, usize) {
+    let Some((head, rest)) = chain.split_first() else { return (String::new(), 0) };
+    let mut parent: Option<(String, usize)> = None;
+    let value = render(head, 0, &mut |name| {
         if name == PARENT {
-            Some(parent.get_or_insert_with(|| expand_chain(rest, ctx)).clone())
+            let (value, _) = parent.get_or_insert_with(|| expand_into(rest, ctx, blocked));
+            Some(value.clone())
         } else {
-            lookup(name, ctx)
+            lookup(name, ctx, blocked)
         }
-    })
+    });
+    (value, 1 + parent.map_or(0, |(_, links)| links))
 }
 
 /// The chain variable: the same field from the next config above.
 pub const PARENT: &str = "parent";
-
-/// Environment variable names in `text` that were refused because they look like secrets.
-pub fn blocked_vars(text: &str, ctx: &Context) -> Vec<String> {
-    let mut blocked: Vec<String> = Vec::new();
-    render(text, 0, &mut |name| {
-        if builtin(name, ctx).is_none() && is_secret_name(name) && !blocked.iter().any(|b| b == name) {
-            blocked.push(name.to_string());
-        }
-        lookup(name, ctx)
-    });
-    blocked
-}
 
 /// Every built-in with its current value, for `term-boss show`.
 pub fn builtins(ctx: &Context) -> Vec<(&'static str, Option<String>)> {
@@ -112,11 +130,15 @@ pub fn is_secret_name(name: &str) -> bool {
         || upper.ends_with("_KEY")
 }
 
-fn lookup(name: &str, ctx: &Context) -> Option<String> {
+/// A built-in, else the environment variable; a secret-looking name is refused and recorded.
+fn lookup(name: &str, ctx: &Context, blocked: &mut Vec<String>) -> Option<String> {
     if let Some(value) = builtin(name, ctx) {
         return value;
     }
     if is_secret_name(name) {
+        if !blocked.iter().any(|b| b == name) {
+            blocked.push(name.to_string());
+        }
         return None;
     }
     env::var_os(name).map(|v| v.to_string_lossy().into_owned())
@@ -309,14 +331,14 @@ fn matching_brace(text: &str, start: usize) -> Option<usize> {
 /// Walk `text`, calling `resolve(name)` for each well-formed reference. `None` or an empty
 /// value counts as unset, matching the shell's `:-` and `:+`.
 fn render(text: &str, depth: usize, resolve: &mut dyn FnMut(&str) -> Option<String>) -> String {
-    let mut out = String::with_capacity(text.len());
+    let mut out = String::with_capacity(text.len().min(MAX_OUTPUT));
     let mut rest = text;
     while let Some(pos) = rest.find('$') {
-        out.push_str(&rest[..pos]);
+        push(&mut out, &rest[..pos]);
         let tail = &rest[pos..];
         if let Some(after) = tail.strip_prefix("$${") {
             // Escaped: emit a literal `${`; what follows is ordinary text.
-            out.push_str("${");
+            push(&mut out, "${");
             rest = after;
             continue;
         }
@@ -325,20 +347,34 @@ fn render(text: &str, depth: usize, resolve: &mut dyn FnMut(&str) -> Option<Stri
         {
             let value = resolve(name).filter(|v| !v.is_empty());
             match (value, modifier) {
-                (Some(v), Modifier::Plain | Modifier::Default(_)) => out.push_str(&v),
+                (Some(v), Modifier::Plain | Modifier::Default(_)) => push(&mut out, &v),
                 (Some(_), Modifier::Alternate(body)) | (None, Modifier::Default(body)) => {
-                    out.push_str(&nested(body, depth, resolve));
+                    push(&mut out, &nested(body, depth, resolve));
                 }
                 (None, Modifier::Plain | Modifier::Alternate(_)) => {}
             }
             rest = &tail[end..];
             continue;
         }
-        out.push('$');
+        push(&mut out, "$");
         rest = &tail[1..];
     }
-    out.push_str(rest);
+    push(&mut out, rest);
     out
+}
+
+/// Append `s` to `out` without exceeding [`MAX_OUTPUT`] bytes, cutting at a character boundary.
+fn push(out: &mut String, s: &str) {
+    let room = MAX_OUTPUT.saturating_sub(out.len());
+    if s.len() <= room {
+        out.push_str(s);
+        return;
+    }
+    let mut cut = room;
+    while !s.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    out.push_str(&s[..cut]);
 }
 
 fn nested(body: &str, depth: usize, resolve: &mut dyn FnMut(&str) -> Option<String>) -> String {
@@ -450,12 +486,20 @@ mod tests {
         unsafe { env::set_var("TERM_BOSS_TEST_SECRET", "hunter2") };
         assert_eq!(expand("[${TERM_BOSS_TEST_SECRET}]", &ctx), "[]");
         assert_eq!(expand("[${TERM_BOSS_TEST_SECRET:-hidden}]", &ctx), "[hidden]");
+        let blocked = |chain: &[&str]| expand_chain(chain, &ctx).blocked;
         assert_eq!(
-            blocked_vars("${TERM_BOSS_TEST_SECRET} ${AWS_SECRET_ACCESS_KEY} ${HOME} ${AWS_SECRET_ACCESS_KEY}", &ctx),
+            blocked(&["${TERM_BOSS_TEST_SECRET} ${AWS_SECRET_ACCESS_KEY} ${HOME} ${AWS_SECRET_ACCESS_KEY}"]),
             vec!["TERM_BOSS_TEST_SECRET".to_string(), "AWS_SECRET_ACCESS_KEY".to_string()]
         );
-        // Secrets inside modifier text are found too.
-        assert_eq!(blocked_vars("${TERM_BOSS_TEST_SET:+${DB_PASSWORD}}", &ctx), vec!["DB_PASSWORD".to_string()]);
+        // Secrets inside rendered modifier text are found; a branch that is not rendered is not.
+        assert_eq!(blocked(&["${TERM_BOSS_TEST_SET:+${DB_PASSWORD}}"]), vec!["DB_PASSWORD".to_string()]);
+        assert!(blocked(&["${TERM_BOSS_TEST_UNSET:+${DB_PASSWORD}}"]).is_empty());
+        // The parent is resolved through the chain, so its `:+` branch is rendered and scanned.
+        let report = expand_chain(&["${parent:+${DB_PASSWORD:-hidden}}", "p"], &ctx);
+        assert_eq!(report.value, "hidden");
+        assert_eq!(report.blocked, vec!["DB_PASSWORD".to_string()]);
+        // A secret in an unused parent is not reported.
+        assert!(blocked(&["plain", "${DB_PASSWORD}"]).is_empty());
         for name in ["GITHUB_TOKEN", "DB_PASSWORD", "passwd", "GOOGLE_CREDENTIALS", "PRIVATE_THING", "API_KEY", "OPENAI_API_KEY"] {
             assert!(is_secret_name(name), "{name}");
         }
@@ -518,27 +562,83 @@ mod tests {
     }
 
     #[test]
+    fn output_is_bounded() {
+        let ctx = setup();
+        let mut chain = vec!["${parent}${parent}"; 30];
+        chain.push("x");
+        let report = expand_chain(&chain, &ctx);
+        assert_eq!(report.value.len(), MAX_OUTPUT);
+        assert!(report.value.bytes().all(|b| b == b'x'));
+        assert_eq!(report.links, 31);
+        // Plain text up to the cap is kept exactly; past it, cut at a character boundary.
+        let exact = "a".repeat(MAX_OUTPUT);
+        assert_eq!(x(&exact), exact);
+        let long = format!("{}é tail", "a".repeat(MAX_OUTPUT - 1));
+        assert_eq!(x(&long), "a".repeat(MAX_OUTPUT - 1));
+        let value = format!("{}é", "b".repeat(MAX_OUTPUT - 1));
+        unsafe { env::set_var("TERM_BOSS_TEST_LONG", &value) };
+        assert_eq!(x("${TERM_BOSS_TEST_LONG}"), "b".repeat(MAX_OUTPUT - 1));
+        assert_eq!(x("${TERM_BOSS_TEST_LONG}${TERM_BOSS_TEST_LONG}").len(), MAX_OUTPUT);
+    }
+
+    #[test]
+    fn links_count_only_parents_actually_read() {
+        let ctx = setup();
+        let links = |chain: &[&str]| expand_chain(chain, &ctx).links;
+        assert_eq!(links(&["a ${parent}", "b", "c"]), 2);
+        assert_eq!(links(&["${parent}", "${parent}", "z"]), 3);
+        assert_eq!(links(&["plain", "b"]), 1);
+        assert_eq!(links(&["${parent_dir}", "b"]), 1);
+        assert_eq!(links(&["${TERM_BOSS_TEST_UNSET:+${parent}}", "b"]), 1);
+        assert_eq!(links(&["${TERM_BOSS_TEST_UNSET:-${parent}}", "b"]), 2);
+        assert_eq!(links(&[]), 0);
+        let escaped = expand_chain(&["$${parent}", "b"], &ctx);
+        assert_eq!((escaped.value.as_str(), escaped.links), ("${parent}", 1));
+    }
+
+    #[test]
+    fn empty_nearest_override_is_kept() {
+        let ctx = setup();
+        let chains = TextChains {
+            badgetext: crate::config::TextChain(vec![
+                (crate::config::Source::Cli, String::new()),
+                (crate::config::Source::Cli, "${host}".into()),
+            ]),
+            ..Default::default()
+        };
+        let mut config = SetConfig { badgetext: Some(String::new()), ..Default::default() };
+        expand_config(&mut config, &chains, &ctx);
+        assert_eq!(config.badgetext.as_deref(), Some(""));
+        // A nearest value that expands to nothing is still unset.
+        let mut config = SetConfig { badgetext: Some("${TERM_BOSS_TEST_UNSET}".into()), ..Default::default() };
+        expand_config(&mut config, &TextChains::default(), &ctx);
+        assert_eq!(config.badgetext, None);
+    }
+
+    #[test]
     fn parent_chain() {
         let ctx = setup();
         let chain = ["doing development as ${parent}", "someuser on ${parent}", "somehost"];
-        assert_eq!(expand_chain(&chain, &ctx), "doing development as someuser on somehost");
+        assert_eq!(expand_chain(&chain, &ctx).value, "doing development as someuser on somehost");
+        let v = |chain: &[&str]| expand_chain(chain, &ctx).value;
         // Only the nearest level is used when it does not refer to its parent.
-        assert_eq!(expand_chain(&["mine", "theirs"], &ctx), "mine");
+        assert_eq!(v(&["mine", "theirs"]), "mine");
         // Levels are expanded in their own right.
-        assert_eq!(expand_chain(&["[${parent}]", "${TERM_BOSS_TEST_SET}"], &ctx), "[val]");
+        assert_eq!(v(&["[${parent}]", "${TERM_BOSS_TEST_SET}"]), "[val]");
         // Twice gives the value twice; inside a modifier body it resolves too.
-        assert_eq!(expand_chain(&["${parent}/${parent}", "x"], &ctx), "x/x");
-        assert_eq!(expand_chain(&["${TERM_BOSS_TEST_UNSET:-${parent}}", "fb"], &ctx), "fb");
+        assert_eq!(v(&["${parent}/${parent}", "x"]), "x/x");
+        assert_eq!(v(&["${TERM_BOSS_TEST_UNSET:-${parent}}", "fb"]), "fb");
     }
 
     #[test]
     fn parent_at_top_of_chain_is_unset() {
         let ctx = setup();
-        assert_eq!(expand_chain(&["a ${parent} b"], &ctx), "a  b");
-        assert_eq!(expand_chain(&["${parent:-none}"], &ctx), "none");
-        assert_eq!(expand_chain(&["${parent:+ on ${parent}}"], &ctx), "");
-        assert_eq!(expand_chain(&["host${parent:+ on ${parent}}", "x"], &ctx), "host on x");
-        assert_eq!(expand_chain(&[], &ctx), "");
+        let v = |chain: &[&str]| expand_chain(chain, &ctx).value;
+        assert_eq!(v(&["a ${parent} b"]), "a  b");
+        assert_eq!(v(&["${parent:-none}"]), "none");
+        assert_eq!(v(&["${parent:+ on ${parent}}"]), "");
+        assert_eq!(v(&["host${parent:+ on ${parent}}", "x"]), "host on x");
+        assert_eq!(v(&[]), "");
         assert_eq!(x("${parent:-solo}"), "solo");
     }
 
@@ -546,8 +646,8 @@ mod tests {
     fn parent_value_is_not_re_expanded() {
         let ctx = setup();
         // The parent expands to literal `${TERM_BOSS_TEST_SET}`, which the child must not scan.
-        assert_eq!(expand_chain(&["<${parent}>", "${TERM_BOSS_TEST_REF}"], &ctx), "<${TERM_BOSS_TEST_SET}>");
-        assert_eq!(expand_chain(&["<${parent}>", "$${parent}"], &ctx), "<${parent}>");
+        assert_eq!(expand_chain(&["<${parent}>", "${TERM_BOSS_TEST_REF}"], &ctx).value, "<${TERM_BOSS_TEST_SET}>");
+        assert_eq!(expand_chain(&["<${parent}>", "$${parent}"], &ctx).value, "<${parent}>");
     }
 
     #[test]
