@@ -170,14 +170,45 @@ impl ColorScheme {
 
 /// `$XDG_CONFIG_HOME/term-boss`, falling back to `$HOME/.config/term-boss`.
 pub fn config_dir() -> Result<PathBuf> {
-    let base = match env::var_os("XDG_CONFIG_HOME") {
-        Some(xdg) => PathBuf::from(xdg),
-        None => {
-            let home = env::var_os("HOME").context("neither XDG_CONFIG_HOME nor HOME is set")?;
-            PathBuf::from(home).join(".config")
-        }
+    config_dir_from(
+        env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
+        env::var_os("HOME").map(PathBuf::from),
+    )
+}
+
+fn config_dir_from(xdg: Option<PathBuf>, home: Option<PathBuf>) -> Result<PathBuf> {
+    let base = match xdg.filter(|path| path.is_absolute()) {
+        Some(xdg) => xdg,
+        None => home
+            .context("neither XDG_CONFIG_HOME nor HOME is set")?
+            .join(".config"),
     };
     Ok(base.join(APP_DIR))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_dir_uses_only_absolute_xdg_paths() {
+        let home = PathBuf::from("/home/test");
+        assert_eq!(
+            config_dir_from(Some(PathBuf::from("/custom/config")), Some(home.clone())).unwrap(),
+            PathBuf::from("/custom/config/term-boss")
+        );
+        for xdg in ["", "relative/config"] {
+            assert_eq!(
+                config_dir_from(Some(PathBuf::from(xdg)), Some(home.clone())).unwrap(),
+                PathBuf::from("/home/test/.config/term-boss")
+            );
+        }
+    }
+
+    #[test]
+    fn config_dir_requires_home_without_absolute_xdg() {
+        assert!(config_dir_from(Some(PathBuf::from("relative")), None).is_err());
+    }
 }
 
 /// Where `term-boss setup colorschemes` writes the converted library.
