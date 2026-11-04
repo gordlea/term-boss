@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/gordlea/term-boss/compare/v1.1.0...v1.2.0) (2026-11-04)
+
+
+### Features
+
+* add base config files and ${parent} variable ([#5](https://github.com/gordlea/term-boss/issues/5)) ([8175480](https://github.com/gordlea/term-boss/commit/817548045ce6f0e8d2cafbb4779e4b33b414ad6f))
+
 ## [1.1.0](https://github.com/gordlea/term-boss/compare/v1.0.0...v1.1.0) (2026-10-28)
 
 
