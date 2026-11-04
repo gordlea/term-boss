@@ -97,19 +97,19 @@ pub struct Expansion {
 /// the same way. Farther levels are only expanded when referenced, and at most once each.
 pub fn expand_chain(chain: &[&str], ctx: &Context) -> Expansion {
     let mut blocked = Vec::new();
-    let (value, links) = expand_into(chain, ctx, &mut blocked);
-    Expansion { value, links, blocked }
+    let (rendered, links) = expand_into(chain, ctx, &mut blocked);
+    Expansion { value: rendered.text, links, blocked }
 }
 
-fn expand_into(chain: &[&str], ctx: &Context, blocked: &mut Vec<String>) -> (String, usize) {
-    let Some((head, rest)) = chain.split_first() else { return (String::new(), 0) };
-    let mut parent: Option<(String, usize)> = None;
+fn expand_into(chain: &[&str], ctx: &Context, blocked: &mut Vec<String>) -> (Rendered, usize) {
+    let Some((head, rest)) = chain.split_first() else { return (Rendered::default(), 0) };
+    let mut parent: Option<(Rendered, usize)> = None;
     let value = render(head, 0, &mut |name| {
         if name == PARENT {
             let (value, _) = parent.get_or_insert_with(|| expand_into(rest, ctx, blocked));
             Some(value.clone())
         } else {
-            lookup(name, ctx, blocked)
+            lookup(name, ctx, blocked).map(Rendered::whole)
         }
     });
     (value, 1 + parent.map_or(0, |(_, links)| links))
@@ -330,55 +330,89 @@ fn matching_brace(text: &str, start: usize) -> Option<usize> {
 
 /// Walk `text`, calling `resolve(name)` for each well-formed reference. `None` or an empty
 /// value counts as unset, matching the shell's `:-` and `:+`.
-fn render(text: &str, depth: usize, resolve: &mut dyn FnMut(&str) -> Option<String>) -> String {
-    let mut out = String::with_capacity(text.len().min(MAX_OUTPUT));
+fn render(text: &str, depth: usize, resolve: &mut dyn FnMut(&str) -> Option<Rendered>) -> Rendered {
+    let mut out = Rendered::with_capacity(text.len());
     let mut rest = text;
-    while let Some(pos) = rest.find('$') {
-        push(&mut out, &rest[..pos]);
+    while !out.cut
+        && let Some(pos) = rest.find('$')
+    {
+        out.push(&rest[..pos]);
         let tail = &rest[pos..];
         if let Some(after) = tail.strip_prefix("$${") {
             // Escaped: emit a literal `${`; what follows is ordinary text.
-            push(&mut out, "${");
+            out.push("${");
             rest = after;
             continue;
         }
         if tail.starts_with("${")
             && let Some((name, modifier, end)) = parse_ref(tail)
         {
-            let value = resolve(name).filter(|v| !v.is_empty());
+            let value = resolve(name).filter(|v| !v.text.is_empty());
             match (value, modifier) {
-                (Some(v), Modifier::Plain | Modifier::Default(_)) => push(&mut out, &v),
+                (Some(v), Modifier::Plain | Modifier::Default(_)) => out.append(&v),
                 (Some(_), Modifier::Alternate(body)) | (None, Modifier::Default(body)) => {
-                    push(&mut out, &nested(body, depth, resolve));
+                    out.append(&nested(body, depth, resolve));
                 }
                 (None, Modifier::Plain | Modifier::Alternate(_)) => {}
             }
             rest = &tail[end..];
             continue;
         }
-        push(&mut out, "$");
+        out.push("$");
         rest = &tail[1..];
     }
-    push(&mut out, rest);
+    out.push(rest);
     out
 }
 
-/// Append `s` to `out` without exceeding [`MAX_OUTPUT`] bytes, cutting at a character boundary.
-fn push(out: &mut String, s: &str) {
-    let room = MAX_OUTPUT.saturating_sub(out.len());
-    if s.len() <= room {
-        out.push_str(s);
-        return;
-    }
-    let mut cut = room;
-    while !s.is_char_boundary(cut) {
-        cut -= 1;
-    }
-    out.push_str(&s[..cut]);
+fn nested(body: &str, depth: usize, resolve: &mut dyn FnMut(&str) -> Option<Rendered>) -> Rendered {
+    if depth >= MAX_DEPTH { Rendered::whole(body.to_string()) } else { render(body, depth + 1, resolve) }
 }
 
-fn nested(body: &str, depth: usize, resolve: &mut dyn FnMut(&str) -> Option<String>) -> String {
-    if depth >= MAX_DEPTH { body.to_string() } else { render(body, depth + 1, resolve) }
+/// Rendered text capped at [`MAX_OUTPUT`] bytes. Once an append had to be cut the text is final:
+/// later chunks are dropped, and so is anything after a value or nested body that was itself
+/// cut, so the result is always a prefix of the full expansion ending on a character boundary,
+/// never a splice around the piece that did not fit.
+#[derive(Debug, Clone, Default)]
+struct Rendered {
+    text: String,
+    cut: bool,
+}
+
+impl Rendered {
+    fn with_capacity(hint: usize) -> Self {
+        Rendered { text: String::with_capacity(hint.min(MAX_OUTPUT)), cut: false }
+    }
+
+    /// A value that was not produced by rendering (environment, built-in, literal).
+    fn whole(text: String) -> Self {
+        Rendered { text, cut: false }
+    }
+
+    fn push(&mut self, s: &str) {
+        if self.cut {
+            return;
+        }
+        let room = MAX_OUTPUT - self.text.len();
+        if s.len() <= room {
+            self.text.push_str(s);
+            return;
+        }
+        let mut end = room;
+        while !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        self.text.push_str(&s[..end]);
+        self.cut = true;
+    }
+
+    /// Append another rendering; if that one was cut, this one ends there too.
+    fn append(&mut self, other: &Rendered) {
+        self.push(&other.text);
+        if other.cut {
+            self.cut = true;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -578,7 +612,16 @@ mod tests {
         let value = format!("{}é", "b".repeat(MAX_OUTPUT - 1));
         unsafe { env::set_var("TERM_BOSS_TEST_LONG", &value) };
         assert_eq!(x("${TERM_BOSS_TEST_LONG}"), "b".repeat(MAX_OUTPUT - 1));
-        assert_eq!(x("${TERM_BOSS_TEST_LONG}${TERM_BOSS_TEST_LONG}").len(), MAX_OUTPUT);
+        // Once a chunk is cut, nothing after it is appended into the leftover bytes: the result
+        // is a prefix of the full expansion, not a splice around the character that did not fit.
+        assert_eq!(x("${TERM_BOSS_TEST_LONG}${TERM_BOSS_TEST_LONG}"), "b".repeat(MAX_OUTPUT - 1));
+        let spliced = format!("{}é${{TERM_BOSS_TEST_SET}}", "a".repeat(MAX_OUTPUT - 1));
+        assert_eq!(x(&spliced), "a".repeat(MAX_OUTPUT - 1));
+        let exact_then_more = format!("{}${{TERM_BOSS_TEST_SET}}", "a".repeat(MAX_OUTPUT));
+        assert_eq!(x(&exact_then_more), "a".repeat(MAX_OUTPUT));
+        // A parent value that was cut stops the child at that point as well.
+        let report = expand_chain(&["${parent}+${TERM_BOSS_TEST_SET}", "${TERM_BOSS_TEST_LONG}é"], &ctx);
+        assert_eq!(report.value, "b".repeat(MAX_OUTPUT - 1));
     }
 
     #[test]
