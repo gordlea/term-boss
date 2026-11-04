@@ -247,7 +247,8 @@ Two base configs sit beneath every directory, so they apply wherever you `cd`, i
 `/tmp` and other users' trees:
 
 - `$XDG_CONFIG_HOME/term-boss/user-base-config.toml` (default
-  `~/.config/term-boss/user-base-config.toml`) for your own defaults.
+  `~/.config/term-boss/user-base-config.toml`) for your own defaults. An empty or relative
+  `XDG_CONFIG_HOME` is ignored, as the XDG spec requires.
 - `/etc/term-boss/hostwide-base-config.toml` for every user on the host.
 
 They use the same keys as `.term-boss.toml`. Typical uses: `reset = true` so leaving a themed

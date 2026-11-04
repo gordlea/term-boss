@@ -50,9 +50,9 @@ pub fn settings_path() -> Result<PathBuf> {
     let user_dir = if cfg!(target_os = "macos") {
         home()?.join("Library/Application Support/Code/User")
     } else {
-        let base = match env::var_os("XDG_CONFIG_HOME") {
-            Some(xdg) if !xdg.is_empty() => PathBuf::from(xdg),
-            _ => home()?.join(".config"),
+        let base = match crate::scheme::xdg_config_home() {
+            Some(xdg) => xdg,
+            None => home()?.join(".config"),
         };
         base.join("Code/User")
     };

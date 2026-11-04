@@ -168,47 +168,30 @@ impl ColorScheme {
     }
 }
 
+/// `XDG_CONFIG_HOME` when it is set and absolute. The spec says a relative value (which
+/// includes an empty one) must be ignored, so a stray value can never point at a directory
+/// relative to the cwd. Shared by every XDG lookup in term-boss.
+pub fn xdg_config_home() -> Option<PathBuf> {
+    absolute_only(env::var_os("XDG_CONFIG_HOME").map(PathBuf::from))
+}
+
+fn absolute_only(path: Option<PathBuf>) -> Option<PathBuf> {
+    path.filter(|path| path.is_absolute())
+}
+
 /// `$XDG_CONFIG_HOME/term-boss`, falling back to `$HOME/.config/term-boss`.
 pub fn config_dir() -> Result<PathBuf> {
-    config_dir_from(
-        env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
-        env::var_os("HOME").map(PathBuf::from),
-    )
+    config_dir_from(xdg_config_home(), env::var_os("HOME").map(PathBuf::from))
 }
 
 fn config_dir_from(xdg: Option<PathBuf>, home: Option<PathBuf>) -> Result<PathBuf> {
-    let base = match xdg.filter(|path| path.is_absolute()) {
+    let base = match absolute_only(xdg) {
         Some(xdg) => xdg,
         None => home
             .context("neither XDG_CONFIG_HOME nor HOME is set")?
             .join(".config"),
     };
     Ok(base.join(APP_DIR))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn config_dir_uses_only_absolute_xdg_paths() {
-        let home = PathBuf::from("/home/test");
-        assert_eq!(
-            config_dir_from(Some(PathBuf::from("/custom/config")), Some(home.clone())).unwrap(),
-            PathBuf::from("/custom/config/term-boss")
-        );
-        for xdg in ["", "relative/config"] {
-            assert_eq!(
-                config_dir_from(Some(PathBuf::from(xdg)), Some(home.clone())).unwrap(),
-                PathBuf::from("/home/test/.config/term-boss")
-            );
-        }
-    }
-
-    #[test]
-    fn config_dir_requires_home_without_absolute_xdg() {
-        assert!(config_dir_from(Some(PathBuf::from("relative")), None).is_err());
-    }
 }
 
 /// Where `term-boss setup colorschemes` writes the converted library.
@@ -268,4 +251,29 @@ pub fn list_dir_names() -> Vec<String> {
     names.sort();
     names.dedup();
     names
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_dir_uses_only_absolute_xdg_paths() {
+        let home = PathBuf::from("/home/test");
+        assert_eq!(
+            config_dir_from(Some(PathBuf::from("/custom/config")), Some(home.clone())).unwrap(),
+            PathBuf::from("/custom/config/term-boss")
+        );
+        for xdg in ["", "relative/config"] {
+            assert_eq!(
+                config_dir_from(Some(PathBuf::from(xdg)), Some(home.clone())).unwrap(),
+                PathBuf::from("/home/test/.config/term-boss")
+            );
+        }
+    }
+
+    #[test]
+    fn config_dir_requires_home_without_absolute_xdg() {
+        assert!(config_dir_from(Some(PathBuf::from("relative")), None).is_err());
+    }
 }
